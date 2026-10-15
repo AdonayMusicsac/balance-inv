@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Catálogo</title>
 
 <meta property="og:title" content="Catálogo">
@@ -326,6 +326,23 @@
     font-size: 11.5px;
     pointer-events: none;
   }
+
+  /* ── Responsive: notch de Android, controles de 44 px, rejillas por ancho ── */
+  .cp-header { padding-top: max(28px, calc(env(safe-area-inset-top, 0px) + 16px)); }
+  .cp-wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-bottom: max(60px, calc(env(safe-area-inset-bottom, 0px) + 60px)); }
+  @media (min-width: 641px) and (max-width: 1024px) { .cp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 1024px) {
+    .cp-wrap { padding-top: 14px; }
+    .cp-search { max-width: none; min-height: 44px; font-size: 16px; }
+    .cp-cat-chip, .cp-fav-toggle { min-height: 44px; font-size: 14px; }
+    .cp-sort { min-height: 44px; font-size: 16px; }
+    .cp-fav-btn { width: 44px; height: 44px; }
+    .cp-share-btn { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+    .cp-ask { min-height: 44px; font-size: 14px; }
+    .cp-header p, .cp-name, .cp-agotado-badge { font-size: 14px; }
+    .cp-cat { font-size: 12px; }
+    .cp-agotado-badge { font-size: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -525,7 +542,7 @@ function poblarCategoriasPublico(lista) {
 
   const cats = document.getElementById('cpCats');
   const chip = (valor, etiqueta) =>
-    `<button type="button" class="cp-cat-chip${valor === cpCategoriaActiva ? ' active' : ''}" onclick="elegirCategoriaPublico(${JSON.stringify(valor).replace(/"/g, '&quot;')})">${escapeHtmlPublico(etiqueta)}</button>`;
+    `<button type="button" class="cp-cat-chip${valor === cpCategoriaActiva ? ' active' : ''}" onclick="elegirCategoriaPublico(${toOnclickArg(valor)})">${escapeHtmlPublico(etiqueta)}</button>`;
   cats.innerHTML = chip('todas', 'Todas') + categorias.map(c => chip(c, c)).join('');
 }
 
@@ -582,12 +599,29 @@ function renderCatalogoPublico(lista, whatsapp) {
 // que las comillas dobles que JSON.stringify usa para envolver el
 // string chocarían con esas si no se escapan a entidad HTML acá.
 function toOnclickArg(str) {
-  return JSON.stringify(str || '').replace(/"/g, '&quot;');
+  // Se escapa '&' primero: el navegador decodifica entidades del atributo
+  // antes de ejecutar el JS, así que "&#39;" pasaría como comilla real.
+  return JSON.stringify(str || '')
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+// Solo https sin comillas/espacios/<>; cualquier otra cosa se descarta.
+function urlImagenSegura(u) {
+  return (typeof u === 'string' && /^https:\/\/[^\s"'<>\\]+$/.test(u)) ? u : '';
+}
+// Miniatura liviana si la imagen está en Cloudinary (f_auto,q_auto,w_N).
+function miniaturaCloudinary(u, w) {
+  return u.indexOf('res.cloudinary.com') > -1 && u.indexOf('/upload/') > -1 && !/\/upload\/[a-z]_/.test(u)
+    ? u.replace('/upload/', '/upload/f_auto,q_auto,w_' + w + '/') : u;
 }
 
 function itemHtmlPublico(p, whatsapp) {
+  const imgOriginal = urlImagenSegura(p.imagen);
+  p = Object.assign({}, p, { imagen: imgOriginal });
   const thumb = p.imagen
-    ? `<img src="${p.imagen}" alt="" loading="lazy">`
+    ? `<img src="${escapeHtmlPublico(miniaturaCloudinary(p.imagen, 400))}" alt="" loading="lazy" decoding="async">`
     : `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>`;
 
   // Solo clickeable si hay foto de verdad — el ícono de "sin imagen"
@@ -714,31 +748,19 @@ function compartirProducto(codigo, nombre) {
 // la persona cancela el selector), cae al link de texto de siempre,
 // con la url de la foto incluida como parte del mensaje — así, aunque
 // no sea un adjunto real, quien lo reciba puede tocarla y verla.
-async function preguntarPorProducto(codigo, nombre, imagenUrl, disponible) {
+function preguntarPorProducto(codigo, nombre, imagenUrl, disponible) {
   registrarConsultaProducto(codigo);
 
   const mensaje = disponible
     ? 'Hola, quería consultar por: ' + nombre
     : 'Hola, vi que "' + nombre + '" está agotado — ¿saben cuándo van a tener más?';
 
-  if (imagenUrl && navigator.share && navigator.canShare) {
-    try {
-      const resp = await fetch(imagenUrl);
-      const blob = await resp.blob();
-      const archivo = new File([blob], 'producto.jpg', { type: blob.type || 'image/jpeg' });
-      if (navigator.canShare({ files: [archivo] })) {
-        await navigator.share({ files: [archivo], text: mensaje });
-        return;
-      }
-    } catch (e) {
-      // Sigue con el link de texto de abajo — cancelar el selector
-      // también entra por acá (no es un error real), así que no hace
-      // falta avisarle nada a la persona.
-    }
-  }
-
-  const textoConFoto = mensaje + (imagenUrl ? '\n' + imagenUrl : '');
-  window.open('https://wa.me/' + cpWhatsapp.replace(/\D/g, '') + '?text=' + encodeURIComponent(textoConFoto), '_blank');
+  // Abre directo el chat de WhatsApp del número (sin menú de compartir).
+  // La foto va como link dentro del mensaje.
+  const texto = mensaje + (imagenUrl ? '\n' + imagenUrl : '');
+  const url = 'https://wa.me/' + cpWhatsapp.replace(/\D/g, '') + '?text=' + encodeURIComponent(texto);
+  const w = window.open(url, '_blank', 'noopener');
+  if (!w) window.location.href = url;   // si el navegador bloquea la ventana nueva
 }
 
 // ── Visor con zoom — pellizcar (mobile), rueda (desktop), doble

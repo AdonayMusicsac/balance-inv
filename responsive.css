@@ -1,0 +1,147 @@
+/* =========================================================
+   BALANCE-INV — Modo responsive (se carga al final, después de
+   base.css, balance.css, stock-card.css, import.css y nueva-nota.css).
+   Escritorio (> 1280 px): intacto, aquí no se toca nada.
+   Tablet (641–1024 px): rejillas de 2 columnas.
+   Teléfono (≤ 640 px): 1 columna, controles de 44 px, modales casi
+   a pantalla completa con botones fijos abajo.
+   Los selectores llevan el prefijo "body" para ganarle a los
+   <style> que cada vista trae incrustado (se inyectan después).
+   ========================================================= */
+
+/* ── Notch / barra de gestos de Android (viewport-fit=cover) ── */
+@media (max-width: 1280px) {
+  body aside.sidebar {
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  body main.main { height: calc(100dvh - 64px - env(safe-area-inset-bottom, 0px)); }
+  body .topbar {
+    padding-top: max(10px, env(safe-area-inset-top, 0px));
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+  }
+  body .page-content { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  body .nav-item { min-height: 48px; font-size: 11px; }
+  body .modal-footer { padding-bottom: max(14px, env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ── Dashboard: las columnas de la rejilla no pueden ser más anchas que la pantalla
+   (las filas con texto nowrap/ellipsis ensanchaban el panel hasta 570 px) ── */
+body .dash-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 1024px) { body .dash-grid { grid-template-columns: minmax(0, 1fr); } }
+body .dash-panel, body .dash-grid > * { min-width: 0; }
+
+/* ── Tablet (641–1024 px): rejillas de 2 columnas ── */
+@media (min-width: 641px) and (max-width: 1024px) {
+  body .form-row { grid-template-columns: 1fr 1fr; }
+  body .dash-stats { grid-template-columns: repeat(3, 1fr); }
+  body .stock-stats, body .hist-stats { grid-template-columns: repeat(3, 1fr); }
+  body .cat-grid { grid-template-columns: repeat(3, 1fr); }
+  body .product-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  body .btn, body .warehouse-tab, body .dash-period-pill, body .cfg-pill { min-height: 44px; }
+  body .btn-icon { min-width: 44px; }
+}
+
+/* ── Teléfono (≤ 640 px) ── */
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+  body .page-content,
+  body .page-content[class] { padding: 12px 12px calc(84px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Barra superior compacta: título arriba, acciones debajo a todo el ancho */
+  body .topbar { padding-top: max(8px, env(safe-area-inset-top, 0px)); padding-bottom: 8px; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); gap: 8px; }
+  body .topbar-title h1 { font-size: 16px; line-height: 1.25; }
+  body .topbar-title p { font-size: 13px; line-height: 1.3; }
+  body .topbar-actions { gap: 8px; }
+  body .topbar-actions .btn { flex: 1 1 calc(50% - 8px); }
+  body .topbar-actions .btn-icon { flex: 0 0 44px; }
+
+  /* Botones y campos: mínimo 44 px de alto (zona táctil) */
+  body .btn, body .btn-import, body .btn-dup-omit, body .btn-dup-update, body .btn-dup-cancel, body .btn-dup-omit-all,
+  body .warehouse-tab, body .dash-period-pill, body .cfg-pill, body .disc-pill, body .hist-card-btn, body .cp-cat-chip { min-height: 44px; height: auto; }
+  body .btn { font-size: 14px; padding-top: 0; padding-bottom: 0; }
+  body .btn.btn-icon, body .btn-icon-edit, body .btn-reg-delete, body .modal-close, body .product-search-clear { min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
+  body .product-search-clear { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }  /* queda dentro del campo de 44 px */
+  body .qty-btn { width: 44px; height: 44px; font-size: 20px; }
+  body .qty-input { width: 56px; height: 44px; font-size: 16px; }
+  body .price-input { width: 96px; height: 44px; font-size: 16px; }
+  body .search-wrap { height: 44px; }
+  body .search-wrap input { font-size: 16px; height: 100%; }
+  body .main input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=hidden]),
+  body .modal input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=hidden]),
+  body .main select, body .modal select, body .form-input, body .form-select { min-height: 44px; font-size: 16px; }
+  body .main textarea, body .modal textarea { font-size: 16px; min-height: 88px; }
+  body .search-wrap input { min-height: 0; }
+  body .stat-label, body .hstat-label, body .filter-label, body .add-input-label, body .form-label { font-size: 12px; }
+
+  /* Formularios a 1 columna */
+  body .form-row, body .dup-card-grid, body .bal-form { grid-template-columns: 1fr; }
+  body .add-product-grid { grid-template-columns: 1fr 1fr; }   /* solo cantidad + precio van lado a lado */
+
+  /* Rejillas de tarjetas */
+  body .dash-stats, body .stock-stats, body .hist-stats, body .cat-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Modales: hoja casi a pantalla completa; el cuerpo se desplaza y los botones quedan fijos abajo */
+  body .modal-overlay { padding: 0; align-items: flex-end; }
+  body .modal-overlay .modal {
+    width: 100%; max-width: 100% !important;
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top, 0px)));
+    display: flex; flex-direction: column; overflow: hidden;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  }
+  body .modal-overlay .modal > .modal-header { flex: 0 0 auto; padding: 14px 16px 12px; }
+  body .modal-overlay .modal > .modal-body,
+  body .modal-overlay .modal > .ver-modal-content,
+  body .modal-overlay .modal > .delete-choice-modal { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-left: 16px; padding-right: 16px; }
+  body .modal-overlay .modal > .modal-footer,
+  body .modal-overlay .modal > .ci-actions,
+  body .modal-overlay .modal > .ver-modal-actions { flex: 0 0 auto; padding: 12px 16px max(14px, env(safe-area-inset-bottom, 0px)); background: var(--surface); }
+  body .modal-footer .btn { min-height: 44px; }
+  body .modal-overlay .modal > :not(.modal-header):not(.modal-body):not(.modal-footer):not(.ci-actions):not(.ver-modal-actions) { min-height: 0; }
+}
+
+/* Teléfonos muy angostos */
+@media (max-width: 380px) {
+  body .page-content, body .page-content[class] { padding-left: 12px; padding-right: 12px; }
+  body .nav-item { padding: 6px 8px; min-width: 56px; font-size: 11px; }
+  body .topbar-actions .btn { flex: 1 1 100%; }
+}
+
+/* ── Celdas con campo dentro de tarjetas (Compras): el campo no puede empujar la tarjeta fuera de pantalla ── */
+@media (max-width: 1024px) {
+  body .bal-table td > select, body .bal-table td > input, body .bal-table td > .fc-wrap { flex: 1 1 0; min-width: 0; max-width: 62%; width: auto; }
+  body .bal-table td > select.ln-prod, body .bal-table .ln-prod { min-width: 0; max-width: 62%; width: auto; }
+}
+
+/* ── Soporte: responder ticket (campo + botón) ── */
+@media (max-width: 640px) {
+  body .sop-reply-form { flex-wrap: wrap; }
+  body .sop-reply-form input { flex: 1 1 100%; min-width: 0; }
+  body .sop-reply-form .btn { flex: 1 1 100%; }
+}
+
+/* ── Teléfono: tipografía legible. Texto corrido y datos a 14 px; etiquetas/insignias en mayúsculas a 12 px (mínimo razonable). ── */
+@media (max-width: 640px) {
+  body .main p, body .main small, body .main td, body .main li, body .main summary, body .main label, body .main b, body .main strong,
+  body .modal p, body .modal label, body .modal small, body .modal li,
+  body .btn, body .btn-import, body .warehouse-tab, body .dash-period-pill, body .cfg-pill, body .disc-pill,
+  body .dash-row-title, body .dash-row-meta, body .dash-row-value, body .dash-panel-link, body #dashTopProductsSub,
+  body .client-card-ruc, body #displayRuc, body #itemCount, body #sumSubtotal, body .summary-row span,
+  body .pc-code, body .pc-name, body .pc-qty, body .pc-price, body .pc-desc, body #footerInfo, body #regFooterInfo,
+  body .hist-card-num, body .hist-card-client, body .hist-card-ruc, body .hist-card-date, body .hist-card-btn,
+  body .cat-name, body .cat-sub, body .cat-switch, body .cfg-row-label, body .cfg-row-desc, body .cfg-card-sub, body #cfgCatLink,
+  body .cfg-row .label, body .cfg-row .val, body .perfil-card-sub, body .perfil-row .label, body .perfil-row span,
+  body #perfilHeaderContacto, body #perfilHeaderDesde, body .sop-card-sub, body .sop-ticket-asunto, body .sop-ticket-meta,
+  body .sop-ticket-msg, body .sop-ticket-reply, body .reg-status-label, body .ln-total, body .bal-table td::before,
+  body .dash-empty, body .cfg-pill { font-size: 14px; }
+  body .main td[data-label]::before, body .stat-label, body .hstat-label, body .filter-label, body .add-input-label, body .form-label,
+  body .origen-tag, body .edit-badge, body .cfg-badge-demo, body .sop-badge, body .sop-tipo-tag, body .reg-role-badge, body .pc-lbl,
+  body #notaNumber, body .nota-number, body .main h3, body .modal-detail-label, body .dash-panel-header span { font-size: 12px; }
+  body .nav-item { font-size: 11px; }
+  body .dash-panel-link, body #filterToggleBtn, body .cat-actions .btn { display: inline-flex; align-items: center; min-height: 44px; }
+  body .dash-panel-link { padding: 0 4px; }
+  body #filterToggleBtn { min-width: 44px; height: 44px; }
+}

@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Iniciar sesión — BALANCE-INV</title>
 <link rel="stylesheet" href="variables.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -564,11 +564,18 @@
     body.mob-pw-step .mob-footer-bar { display: none; }
   }
 
+
+  /* ── Notch / barra de gestos de Android (viewport-fit=cover) ── */
+  @media (max-width: 639px) {
+    .mob-nav { padding-top: calc(56px + env(safe-area-inset-top, 0px)); }
+    body.mob-pw-step .mob-nav { padding-top: calc(38px + env(safe-area-inset-top, 0px)); }
+    .login-form-panel { padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  }
 </style>
 </head>
 <body>
 <nav class="mob-nav">
-  <img src="logo-balanceinv.png" alt="BALANCE-INV">
+  <img src="logo-balanceinv.png" alt="BALANCE-INV" onerror="this.style.display='none'">
 </nav>
 
 <div class="bg-carousel" id="bgCarousel">
@@ -581,13 +588,13 @@
 <div class="login-shell">
 
   <div class="login-brand">
-    <img src="logo-balanceinv.png" alt="BALANCE-INV">
+    <img src="logo-balanceinv.png" alt="BALANCE-INV" onerror="this.style.display='none'">
     <p class="login-brand-tag">Pasión por el sonido</p>
   </div>
 
   <div class="login-form-panel">
     <div class="login-header">
-      <img src="logo-balanceinv.png" alt="BALANCE-INV">
+      <img src="logo-balanceinv.png" alt="BALANCE-INV" onerror="this.style.display='none'">
       <h1>Bienvenido de nuevo</h1>
       <p>Elige tu rol para continuar</p>
     </div>

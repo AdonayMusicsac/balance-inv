@@ -3,7 +3,7 @@
 // Solo deja pasar los campos públicos (nunca precio, stock, costos ni tipo). Se usa en la app (botón
 // "Descargar catalogo.json") y en la automatización de GitHub (scripts/copiar-catalogo.js).
 function copiaEstatica(nodo) {
-  const n = nodo || {}, https = u => (typeof u === 'string' && /^https:\/\/.+/.test(u) ? u : '');
+  const n = nodo || {}, https = u => (typeof u === 'string' && /^https:\/\/[^\s"'<>\\]+$/.test(u) ? u : '');
   const out = { activo: n.activo === true, nombre: String(n.nombre || '').slice(0, 80), whatsapp: String(n.whatsapp || '').replace(/\D/g, ''), actualizadoEn: Date.now(), productos: {} };
   if (!out.activo) { out.nombre = ''; out.whatsapp = ''; return out; }
   Object.entries(n.productos || {}).forEach(([code, p]) => {

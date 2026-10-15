@@ -6,7 +6,7 @@
 // ni el tipo importado/nacional. catalogo-publico.html lee únicamente ese nodo.
 const refCatalogoPublico = db.ref('catalogoPublico');
 const CAT_PAGINA = 24;
-const _urlHttps = u => (/^https:\/\/\S+$/i.test(u || '') ? u : '');
+const _urlHttps = u => (/^https:\/\/[^\s"'<>\\]+$/i.test(u || '') ? u : '');
 const _esAdminCat = () => typeof isAdmin !== 'function' || isAdmin();
 const _firma = o => JSON.stringify(Object.keys(o || {}).sort().map(k => [k, o[k]]));
 
@@ -22,17 +22,28 @@ function productoPublico(p) {
 }
 
 // Deja catalogoPublico/productos igual a lo que debe verse: escribe solo lo que cambió.
+let _catActual = null, _catActualTs = 0;   // espejo en memoria: evita bajar todo el catálogo en cada venta
 async function sincronizarCatalogoPublico() {
   let cfg;
-  try { cfg = (await refCatalogoPublico.get()).val() || {}; } catch (e) { return { omitido: true }; }
-  if (cfg.activo !== true) return { omitido: true };
+  try {
+    const act = (await refCatalogoPublico.child('activo').get()).val();   // lectura mínima
+    if (act !== true) { _catActual = null; return { omitido: true }; }
+    cfg = { activo: true };
+    if (!_catActual || Date.now() - _catActualTs > 10 * 60 * 1000) {
+      _catActual = (await refCatalogoPublico.child('productos').get()).val() || {};
+      _catActualTs = Date.now();
+    }
+  } catch (e) { return { omitido: true }; }
   const prods = (await refProducts.get()).val() || {}, deseado = {}, cambios = {};
   Object.entries(prods).forEach(([code, p]) => { if (!p.deleted && p.publicar !== false && p.name) deseado[code] = productoPublico(p); });
-  const actual = cfg.productos || {};
+  const actual = _catActual || {};
   Object.keys(deseado).forEach(c => { if (_firma(actual[c]) !== _firma(deseado[c])) cambios[c] = deseado[c]; });
   Object.keys(actual).forEach(c => { if (!deseado[c]) cambios[c] = null; });
   const n = Object.keys(cambios).length;
-  if (n) await refCatalogoPublico.child('productos').update(cambios);
+  if (n) {
+    await refCatalogoPublico.child('productos').update(cambios);
+    Object.keys(cambios).forEach(c => { if (cambios[c] === null) delete _catActual[c]; else _catActual[c] = cambios[c]; });
+  }
   return { escritos: n };
 }
 
@@ -108,7 +119,7 @@ async function datosCatalogo() {
   let cfg = {};
   try { cfg = (await refCatalogoPublico.get()).val() || {}; } catch (e) { /* sin permiso: catálogo inactivo */ }
   const link = cfg.activo === true ? linkCatalogo(cfg.urlBase) : '';
-  return { cfg, link, motivo: link ? '' : (cfg.activo === true ? 'Abre la app una vez, como administrador, desde tu página publicada (por ejemplo la de GitHub Pages) y el link se guarda solo.' : 'El catálogo aún no está activo. Actívalo en Catálogo → Publicación y guarda.') };
+  return { cfg, link, motivo: link ? '' : (cfg.activo === true ? 'Abre la app como admin desde tu página publicada una vez.' : 'Catálogo inactivo: actívalo en Publicación.') };
 }
 async function copiarLinkCatalogo() {
   const { link, motivo } = await datosCatalogo();

@@ -34,8 +34,8 @@ function sopRenderTicketRow(t, { withReplyForm } = {}) {
     : '';
   const replyForm = (withReplyForm && t.estado !== 'resuelto')
     ? `<div class="sop-reply-form">
-         <input type="text" id="sopReplyInput_${t.id}" placeholder="Responder y marcar como resuelto…">
-         <button class="btn btn-ghost" style="height:30px;padding:0 10px" onclick="responderReporteSoporte('${t.id}')">Responder</button>
+         <input type="text" id="sopReplyInput_${escapeHtml(String(t.id))}" placeholder="Responder y marcar como resuelto…">
+         <button class="btn btn-ghost" style="height:30px;padding:0 10px" onclick="responderReporteSoporte('${escapeJsAttr(String(t.id))}')">Responder</button>
        </div>`
     : '';
 

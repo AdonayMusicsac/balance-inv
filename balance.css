@@ -40,27 +40,42 @@
   nav.sidebar-nav .nav-item { flex: 0 0 auto; }
 }
 
-/* Teléfono: formularios a 2 columnas, tablas convertidas en tarjetas, controles táctiles de 44 px. */
-@media (max-width: 640px) {
-  .bal-card { padding: 12px; border-radius: 12px; }
-  .bal-form { grid-template-columns: 1fr 1fr; }
-  .bal-form .bal-wide { grid-column: 1 / -1; }
-  .bal-form input, .bal-form select, .bal-bar input, .bal-bar select, .bal-table input { height: 44px; font-size: 16px; }  /* 16 px evita el zoom automático de iOS */
-  .bal-card .btn { min-height: 44px; width: 100%; }
-  .bal-bar .btn { flex: 1 1 100%; }
+/* Tablet y teléfono (≤ 1024 px): las tablas anchas se convierten en tarjetas apiladas (usan data-label de cada celda). */
+@media (max-width: 1024px) {
   .bal-scroll { overflow: visible; }
   .bal-table thead { display: none; }
   .bal-table, .bal-table tbody, .bal-table tr, .bal-table td { display: block; width: 100%; }
   .bal-table tr { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; padding: 6px 12px; }
   .bal-table td { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border: none; text-align: right; word-break: break-word; }
-  .bal-table td::before { content: attr(data-label); flex: 0 0 38%; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
+  .bal-table td::before { content: attr(data-label); flex: 0 0 38%; text-align: left; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
   .bal-table td:first-child { font-weight: 600; font-size: 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 2px; }
   .bal-table td[data-label=""] { justify-content: flex-end; }
   .bal-table td[data-label=""]::before, .bal-table td:empty { display: none; }
-  .bal-table td .btn { width: auto; min-height: 36px; }
+  .bal-table td .btn { width: auto; min-height: 44px; }
   .bal-table td input { width: 110px; }
+  .bal-table .ln-prod { min-width: 0; width: 100%; }
+}
+/* Tablet (641–1024 px): las tarjetas de listas (compras, balance) van en 2 columnas; el formulario de líneas se queda a 1. */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .bal-table tbody { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+  .bal-table tbody:has(.ln-prod) { display: block; }
+  .bal-table tbody tr { margin-bottom: 0; }
+  .bal-form { grid-template-columns: 1fr 1fr; }
+  .bal-kpis { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* Teléfono (≤ 640 px): formularios a 1 columna, controles táctiles de 44 px, tarjetas con poco relleno. */
+@media (max-width: 640px) {
+  .bal-card { padding: 12px; border-radius: 12px; }
+  .bal-form { grid-template-columns: 1fr; }
+  .bal-form input, .bal-form select, .bal-bar input, .bal-bar select, .bal-table input, .bal-table select { height: 44px; font-size: 16px; }  /* 16 px evita el zoom automático de iOS */
+  .bal-card .btn { min-height: 44px; width: 100%; }
+  .bal-bar .btn { flex: 1 1 100%; }
   .bal-kpis { grid-template-columns: 1fr 1fr; }
   .bal-lists { grid-template-columns: 1fr; }
+  .bal-note, .bal-hint, .bal-alert, .bal-total { font-size: 14px; }
+  .bal-field > span { font-size: 13px; }
+  .bal-field > small, .bal-kpi small { font-size: 12px; }
 }
 
 /* Catálogo público (pantalla de administración) */
@@ -91,7 +106,6 @@
 
 .bal-hint { font-size: 13px; color: var(--text-3); margin: 6px 0 10px; line-height: 1.4; }
 .bal-table .ln-prod { min-width: 220px; }
-@media (max-width: 640px) { .bal-table .ln-prod { min-width: 0; width: 100%; } }
 
 /* Leer comprobante + modal de previsualización */
 .bal-import { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; padding: 12px; border: 1px dashed var(--border); border-radius: var(--r-sm); }
@@ -110,3 +124,27 @@
 @media (max-width: 640px) { .fc-select { height: 44px; font-size: 16px; width: 100%; } }
 .bal-resumen { background: var(--accent-soft); border-radius: var(--r-sm); padding: 12px 14px; margin-bottom: 12px; font-size: 14px; line-height: 1.5; }
 .bal-resumen strong { font-weight: 700; }
+
+/* Revisión del comprobante: cada línea es una tarjeta con campos de ancho completo */
+.ci-modal { max-width: 860px; }
+.ci-modal .bal-table, .ci-modal .bal-table tbody, .ci-modal .bal-table tr, .ci-modal .bal-table td.ci-cell { display: block; width: 100%; }
+.ci-modal .bal-table tr { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--surface, #fff); }
+.ci-modal td.ci-cell { padding: 0; border: 0; }
+.ci-top { display: flex; gap: 8px; margin-bottom: 10px; }
+.ci-top .ci-desc { flex: 1; min-width: 0; font-weight: 600; }
+.ci-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; align-items: end; }
+.ci-f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3, #777); min-width: 0; }
+.ci-f input, .ci-f select { width: 100%; min-width: 0; }
+.ci-f-prod { grid-column: span 6; }
+.ci-nuevo { grid-column: span 3; }
+.ci-f b { font-size: 14px; color: var(--text, #111); padding: 10px 0; }
+@media (min-width: 720px) { .ci-f-prod { grid-column: span 3; } .ci-nuevo { grid-column: span 3; } .ci-grid { grid-template-columns: repeat(6, 1fr); } }
+@media (max-width: 719px) { .ci-grid { grid-template-columns: repeat(2, 1fr); } .ci-f-prod, .ci-nuevo { grid-column: span 2; } }
+
+/* Origen del producto: texto discreto bajo el código, sin etiqueta de color */
+.origen-mini { display: flex; align-items: center; gap: 5px; margin-top: 3px; font-family: var(--font, inherit); font-size: 11px; font-weight: 500; color: var(--text-3, #777); white-space: nowrap; }
+.origen-mini i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block; }
+.origen-mini.origen-imp { background: none; color: #5b6b8c; }
+.origen-mini.origen-nac { background: none; color: #4b7a5a; }
+.origen-mini.origen-sin { background: none; color: #a15c00; }
+.pt-noprice { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #fff1d6; color: #a15c00; white-space: nowrap; }

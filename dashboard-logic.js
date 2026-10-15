@@ -72,7 +72,7 @@ window.Dashboard = (function () {
         <div class="dash-row">
           <div class="dash-row-main">
             <div class="dash-row-title">${escapeHtml(String(o.numero || o.id || ''))} — ${escapeHtml(cliente)}</div>
-            <div class="dash-row-meta">${fecha}</div>
+            <div class="dash-row-meta">${escapeHtml(String(fecha))}</div>
           </div>
           <div class="dash-row-value">S/ ${fmtPrice(Number(o.total) || 0)}</div>
         </div>

@@ -15,6 +15,7 @@
     const txt = (n, t) => { const e = n && first(n, t); return e ? e.textContent.trim() : ''; };
     const root = doc.documentElement, kind = root.localName;
     if (!['Invoice', 'CreditNote', 'DebitNote'].includes(kind)) throw new Error('Este XML no es una factura o boleta electrónica.');
+    if (kind !== 'Invoice') throw new Error('Este XML es una nota de ' + (kind === 'CreditNote' ? 'crédito' : 'débito') + ', no una factura ni boleta de compra: no se puede cargar como compra.');
     const idFull = [...root.children].find(e => e.localName === 'ID'); const id = idFull ? idFull.textContent.trim() : '';
     const [serie, numero] = id.split('-');
     const code = txt(root, 'InvoiceTypeCode');
@@ -24,48 +25,222 @@
     const lineas = all(root, kind === 'Invoice' ? 'InvoiceLine' : kind === 'CreditNote' ? 'CreditNoteLine' : 'DebitNoteLine').map(l => {
       const qty = num(txt(l, 'InvoicedQuantity') || txt(l, 'CreditedQuantity') || txt(l, 'DebitedQuantity'));
       const alt = first(l, 'AlternativeConditionPrice'), pr = first(l, 'Price');
-      const precio = alt ? num(txt(alt, 'PriceAmount')) : pr ? r2(num(txt(pr, 'PriceAmount')) * IGV) : 0;
+      const gratis = all(l, 'AlternativeConditionPrice').some(a => txt(a, 'PriceTypeCode') === '02');   // 02 = valor referencial (línea gratuita)
+      const precio = gratis ? 0 : alt ? num(txt(alt, 'PriceAmount')) : pr ? r2(num(txt(pr, 'PriceAmount')) * IGV) : 0;
       const item = first(l, 'Item'), sid = item && first(item, 'SellersItemIdentification');
       return { codigo: sid ? txt(sid, 'ID') : '', desc: item ? txt(item, 'Description') : '', qty, precio };
     });
-    return { origen: 'XML', tipo: code === '03' ? 'Boleta' : 'Factura', serie: serie || '', numero: numero || '', fecha: txt(root, 'IssueDate'), proveedor, ruc, lineas };
+    return { origen: 'XML', tipo: code === '03' ? 'Boleta' : 'Factura', serie: serie || '', numero: numero || '', fecha: txt(root, 'IssueDate'), moneda: (txt(root, 'DocumentCurrencyCode') || 'PEN').toUpperCase(), proveedor, ruc, lineas };
   }
 
-  // ── Texto (PDF u OCR): se buscan los datos típicos; las líneas son "mejor esfuerzo" ──
+  // ── Texto (PDF u OCR): se buscan los datos típicos; las líneas se detectan sin importar el orden de las columnas ──
+  const UNIDAD = /^(UND|UNID|UNIDAD|UNIDADES|NIU|ZZ|SET|PZA|PZ|PAR|CJA|CAJA|KG|MTR|LT|DOC)\.?$/i;
+  const MONEDA_TOK = /^(S\/\.?|PEN|USD|%|\$)$/i;
+  const esNum = s => /^(?:S\/\.?|\$)?\s*\d[\d.,]*$/.test(s);
+  const STOP = /total|son:|igv|subtotal|importe|valor|observ|gracias|forma de pago|monto|hash|representaci|sunat|ruc|fecha|banco|cuenta|descuento|cantidad|descripci|gravada|inafecta|exonerad|gratuita|letras|s\/\s*\d/i;
+
+  // Busca cantidad × precio = importe entre los números de una línea (en cualquier orden de columnas).
+  function lineaProducto(raw) {
+    let toks = raw.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+    if (toks.length < 4) toks = raw.split(/\s+/).filter(Boolean);
+    if (toks.length < 3 || toks.length > 60) return null;
+    const m0 = toks[0].match(/^(\d+(?:[.,]\d+)?)\s+(\S.*)$/);   // «1 VB117Y1/4»: cantidad y modelo pegados en una sola celda
+    if (m0) toks = [m0[1], m0[2], ...toks.slice(1)];
+    const nums = [], textos = [], crudos = [], codNum = [];
+    toks.forEach((t, i) => {
+      if (/^0\d{2,}$/.test(t) || /^\d{5,}$/.test(t)) { codNum.push(t); return; }   // «00019», «062033039»: es un código, no una cantidad ni un precio
+      if (esNum(t)) { nums.push(num(t)); crudos.push(t); }
+      else if (/^\d{1,3}(?:\s?[-–+\/]\s?\d{1,3})+%?$/.test(t) && toks.slice(i + 1).some(esNum)) return;   // columna de descuento («10-6», «10+5») entre las de precio: no es parte de la descripción
+      else if (!UNIDAD.test(t) && !MONEDA_TOK.test(t)) textos.push(t);
+    });
+    if (nums.length < 3 || nums.length > 12) return null;
+    let mejor = null;
+    for (let a = 0; a < nums.length; a++) for (let b = 0; b < nums.length; b++) for (let c = 0; c < nums.length; c++) {
+      if (a === b || b === c || a === c) continue;
+      const q = nums[a], p = nums[b], t = nums[c];
+      if (!(q > 0) || !(t > 0) || q > 100000) continue;
+      const tol = Math.max(0.05, 0.005 * t);
+      let exacto;
+      if (Math.abs(q * p - t) <= tol) exacto = true; else if (Math.abs(q * p * IGV - t) <= tol) exacto = false; else continue;
+      const cand = { a, b, c, q, precio: exacto ? p : r2(p * IGV), t, exacto, orden: a < b && b < c };
+      const mejorQue = !mejor || (cand.exacto !== mejor.exacto ? cand.exacto : cand.t !== mejor.t ? cand.t > mejor.t : cand.orden !== mejor.orden ? cand.orden : false);
+      if (mejorQue) mejor = cand;
+    }
+    if (!mejor) return null;
+    let codigo = '', desc = textos;
+    if (textos.length >= 2 && /[\d-]/.test(textos[0]) && textos[0].length <= 25) { codigo = textos[0]; desc = textos.slice(1); }
+    if (!codigo) { const k = crudos.find((s, i) => i !== mejor.a && i !== mejor.b && i !== mejor.c && /^\d{4,}$/.test(s)); codigo = k || codNum[0] || ''; }
+    const d = desc.join(' ').trim();
+    if (!d && !codigo) return null;
+    return { codigo, desc: d, qty: mejor.q, precio: mejor.precio };
+  }
+
+  // Nombre corto para Stock: lo que va antes de «CON …», «EN …» o una comilla; la descripción completa queda aparte.
+  function nombreCorto(desc) {
+    const d = String(desc || '').replace(/\s+/g, ' ').trim();
+    if (d.length <= 40) return d;
+    const corte = d.search(/\s(?:CON|CONTIENE|EN|INCLUYE)\s|\s["“(]/i);
+    if (corte >= 12) return d.slice(0, corte).trim();
+    return d.split(' ').slice(0, 5).join(' ');
+  }
+  // Líneas que NO pueden ser el nombre del proveedor (direcciones, teléfonos, datos del cliente, forma de pago, bancos, columnas…).
+  const RUIDO_NOMBRE = /factura|boleta|cliente|se[ñn]or|adquirente|direcci|^dir\b|dir\.|local|\bjr\b|jr\.|\bav\b|av\.|calle|\bcal\b|cal\.|urb\.|distrito|telf|tel[eé]f|tel:|@|www\.|\.com|\.pe\b|correo|e-mail|ruc|fecha|gu[ií]a|forma\s*(?:de\s*)?pago|cr[eé]dito|contado|condici|vendedor|moneda|o\/c|orden de|vencim|observ|banco|cuenta|bcp|bbva|interbank|total|monto|importe|valor|igv|descuento|cantidad|descripci|c[oó]digo|unidad|\bnro\b|n[°º]|p[aá]gina|representaci|sunat|electr[oó]nica/i;
+  // Para nombres ya guardados solo se descartan los que claramente son una dirección o un dato suelto.
+  const parecedireccion = x => /dir\.|direcci|local:|\bjr\b|jr\.|\bav\.|\bcalle\b|urb\.|telf|@|www\.|\.com|forma\s*pago|cr[eé]dito\s*\d/i.test(String(x || ''));
+  // Filas con solo cantidad y precio unitario (sin columna de importe): se usan únicamente si no se pudo leer ninguna fila completa.
+  function lineaSimple(raw) {
+    let toks = raw.split(/\s{2,}/).map(x => x.trim()).filter(Boolean);
+    if (toks.length < 4) toks = raw.split(/\s+/).filter(Boolean);
+    const nums = [], textos = [], codNum = [];
+    toks.forEach(t => {
+      if (/^0\d{2,}$/.test(t) || /^\d{5,}$/.test(t)) codNum.push(t);
+      else if (esNum(t)) nums.push(num(t));
+      else if (!UNIDAD.test(t) && !MONEDA_TOK.test(t)) textos.push(t);
+    });
+    if (nums.length !== 2 || !textos.length || !(nums[0] > 0) || nums[0] > 100000 || !(nums[1] > 0)) return null;
+    let codigo = codNum[0] || '', desc = textos;
+    if (!codigo && textos.length >= 2 && /[\d-]/.test(textos[0]) && textos[0].length <= 25) { codigo = textos[0]; desc = textos.slice(1); }
+    return { codigo, desc: desc.join(' ').trim(), qty: nums[0], precio: nums[1] };
+  }
+  const MESES = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, setiembre: 9, septiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 };
   function parseTexto(texto, origen) {
     const t = String(texto || '').replace(/\r/g, '');
-    const ruc = (t.match(/\b(20\d{9}|10\d{9})\b/) || [])[1] || '';
-    const m = t.match(/\b([FEBfeb][A-Za-z0-9]{3})\s*[-–]\s*0*(\d{1,8})\b/);
-    const f1 = t.match(/\b(\d{4})-(\d{2})-(\d{2})\b/), f2 = t.match(/\b(\d{2})[\/-](\d{2})[\/-](\d{4})\b/);
-    const fecha = f1 ? f1[0] : f2 ? `${f2[3]}-${f2[2]}-${f2[1]}` : '';
-    const lineas = [];
+    const filas0 = t.split('\n').map(x => x.trim().replace(/\s{2,}/g, ' ')).filter(Boolean);
+    // El RUC del proveedor es el del emisor, no el del cliente: se descarta el RUC que está junto a «SEÑOR(ES)» / «CLIENTE».
+    const reRuc = /\b(20\d{9}|10\d{9})\b/g;
+    const iCli = filas0.findIndex(x => /se[ñn]or(?:es)?\b|cliente|adquirente/i.test(x));
+    const rucsCli = new Set();
+    if (iCli >= 0) for (let k = Math.max(0, iCli - 1); k <= Math.min(filas0.length - 1, iCli + 1); k++) (filas0[k].match(reRuc) || []).forEach(r => rucsCli.add(r));
+    const ruc = (t.match(reRuc) || []).find(r => !rucsCli.has(r)) || '';
+    // Serie y número: «F001-123», «F001 - 000123», «F001 Nº 000123», o la serie en una fila y el número en la siguiente.
+    let m = t.match(/\b([FEBfeb][A-Za-z0-9]{3})\s*[-–]\s*(?:N[°ºo.]*\s*)?(\d{1,10})\b/) || t.match(/\b([FEBfeb][A-Za-z0-9]{3})\s+N[°ºo.]*\s*(\d{1,10})\b/);
+    if (!m) {
+      for (let i = 0; i < filas0.length && !m; i++) {
+        const sm = filas0[i].match(/\b([FEB]\d{3}|[FEB][A-Z]\d{2})\b/);
+        if (!sm) continue;
+        const resto = filas0[i].slice(filas0[i].indexOf(sm[1]) + sm[1].length) + ' ' + (filas0[i + 1] || '');
+        const nm = resto.match(/(?:N[°ºo.]*\s*|[-–]\s*)(\d{1,10})\b/) || resto.match(/\b(\d{4,10})\b/) || resto.match(/^\s*(\d{1,10})(?![\d\/.]|-\d)/);   // «E001 20-»: el número sigue a la serie
+        if (nm) m = [null, sm[1], nm[1]];
+      }
+    }
+    const pad2 = n => String(n).padStart(2, '0');
+    const l1 = t.match(/emisi[oó]n\s*:?\s*(\d{4})-(\d{1,2})-(\d{1,2})/i), l2 = t.match(/emisi[oó]n\s*:?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/i);
+    let fecha = l1 ? `${l1[1]}-${pad2(l1[2])}-${pad2(l1[3])}` : l2 ? `${l2[3]}-${pad2(l2[2])}-${pad2(l2[1])}` : '';
+    if (!fecha) {   // sin rótulo «Emisión»: la primera fecha del documento que no sea de vencimiento ni de leyendas
+      const tf = t.split('\n').filter(x => !/venc|autorizad|desde el/i.test(x)).join('\n');
+      const f1 = tf.match(/\b(\d{4})-(\d{2})-(\d{2})\b/), f2 = tf.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/), f3 = tf.match(/\b(\d{1,2})\s+de\s+([A-Za-záéíóú]+)\s+(?:del?\s+)?(\d{4})\b/i);
+      fecha = f1 ? f1[0] : f2 ? `${f2[3]}-${pad2(f2[2])}-${pad2(f2[1])}` : '';
+      if (!fecha && f3 && MESES[f3[2].toLowerCase()]) fecha = `${f3[3]}-${pad2(MESES[f3[2].toLowerCase()])}-${pad2(f3[1])}`;
+    }
+    const lineas = []; let ultima = null, cont = 0;
     t.split('\n').forEach(raw => {
-      const l = raw.trim().replace(/\s{2,}/g, '  ');
-      const x = l.match(/^(?:(\S+)\s+)?(.{3,}?)\s+(\d+(?:[.,]\d+)?)\s+(?:UND|UNID|UNIDAD|NIU|ZZ|SET|PZA)?\s*([\d.,]+)\s+([\d.,]+)$/i);
-      if (!x) return;
-      const qty = num(x[3]), a = num(x[4]), b = num(x[5]);
-      if (!(qty > 0)) return;
-      if (Math.abs(qty * a - b) <= 0.05 * Math.max(1, b)) lineas.push({ codigo: x[1] || '', desc: x[2].trim(), qty, precio: a });          // precio unitario con IGV
-      else if (Math.abs(qty * a * IGV - b) <= 0.05 * Math.max(1, b)) lineas.push({ codigo: x[1] || '', desc: x[2].trim(), qty, precio: r2(a * IGV) });   // precio sin IGV
+      const l = raw.trim();
+      const it = l ? lineaProducto(l) : null;
+      if (it) { lineas.push(it); ultima = it; cont = 0; return; }
+      // Descripción larga que continúa en la fila de abajo (sin números de cantidad/precio).
+      if (ultima && cont < 2 && l.length >= 3 && l.length <= 90 && /[A-Za-zÁÉÍÓÚ]{3}/.test(l) && !STOP.test(l) && !/\d+[.,]\d{2}\b/.test(l) && !/\b[FEBfeb][A-Za-z0-9]{3}\s*-\s*\d/.test(l)) { ultima.desc = (ultima.desc + ' ' + l.replace(/\s{2,}/g, ' ')).trim(); cont++; }
+      else ultima = null;
     });
-    const prov = (t.split('\n').map(s => s.trim()).find(s => s.length > 4 && !/\d{8,}/.test(s) && /[A-Za-zÁÉÍÓÚ]{4}/.test(s)) || '');
-    return { origen, tipo: /boleta/i.test(t) && !/factura/i.test(t) ? 'Boleta' : 'Factura', serie: m ? m[1].toUpperCase() : '', numero: m ? m[2] : '', fecha, proveedor: prov, ruc, lineas };
+    // Segunda pasada: facturas que traen solo cantidad y precio unitario (sin importe). Se leen entre la cabecera de la tabla y los totales.
+    if (!lineas.length) {
+      const rows = t.split('\n').map(x => x.trim()).filter(Boolean);
+      const iHead = rows.findIndex(x => /cant/i.test(x) && /descripci|detalle|producto/i.test(x));
+      if (iHead >= 0) {
+        for (let k = iHead + 1; k < rows.length; k++) {
+          if (/sub\s*total|valor\s+(?:de\s+)?venta|gravada|^son:|importe\s+total|^total/i.test(rows[k])) break;
+          const it = lineaSimple(rows[k]); if (it) lineas.push(it);
+        }
+        // ¿Los precios vienen sin IGV? Se compara la suma cantidad × precio con «Valor de venta» (sin IGV) y con el total (con IGV).
+        const valNum = re => { const mm = t.match(re); return mm ? num(mm[1]) : 0; };
+        const vVenta = valNum(/(?:sub\s*total\s+ventas|valor\s+(?:de\s+)?venta|gravada)[^\d\n]*([\d.,]+)/i), vTotal = valNum(/^(?:importe\s+total|precio\s+de\s+venta|total(?:\s+general)?)\b[^\d\n]*([\d.,]+)/im);
+        const suma = lineas.reduce((a, l) => a + l.qty * l.precio, 0), cerca = (x, y) => y > 0 && Math.abs(x - y) <= Math.max(0.5, 0.005 * y);
+        if (lineas.length && cerca(suma, vVenta) && !cerca(suma, vTotal)) lineas.forEach(l => { l.precio = r2(l.precio * IGV); });
+      }
+    }
+    const filas = filas0;
+    const crudas = t.split('\n').map(x => x.trim()).filter(Boolean);   // con los espacios dobles que separan columnas
+    const SUFIJO = /\b(S\.?A\.?C|S\.?R\.?L|E\.?I\.?R\.?L|S\.?A\.?A|S\.?A)\b\.?/i;
+    const limpiar = x => x.replace(/R\.?\s?U\.?\s?C\.?\s*(?:N[°ºo.]*)?\s*:?/gi, ' ').replace(new RegExp(ruc || '#####', 'g'), ' ').replace(/[:|]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const valido = x => x.length >= 4 && /[A-Za-zÁÉÍÓÚÑ]{4}/.test(x) && !RUIDO_NOMBRE.test(x) && !/\d{5,}/.test(x) && !esNum(x);
+    const celdas = k => (crudas[k] || '').split(/\s{2,}/).map(limpiar).filter(Boolean);   // una fila puede traer el nombre del emisor y, al lado, el recuadro de la factura
+    const limite = iCli < 0 ? filas.length : iCli;   // lo que va después de «SEÑOR(ES)» es el cliente, no el proveedor
+    let prov = '';
+    const iRuc = ruc ? filas.findIndex(x => x.includes(ruc)) : -1;
+    if (iRuc >= 0) {
+      prov = celdas(iRuc).find(valido) || '';                  // «HERCULES PERU SAC  RUC 2060…»
+      for (let k = iRuc - 1; k >= Math.max(0, iRuc - 3) && !prov; k--) prov = celdas(k).find(valido) || '';   // el nombre suele ir justo encima del RUC
+    }
+    if (!prov) for (const x of filas.slice(0, limite)) { const mm = x.match(/^(?:raz[oó]n social|proveedor|emisor|empresa)\s*:\s*(.+)$/i); if (mm && valido(limpiar(mm[1]))) { prov = limpiar(mm[1]); break; } }
+    if (!prov) for (let k = 0; k < limite && !prov; k++) prov = celdas(k).find(c => SUFIJO.test(c) && valido(c)) || '';
+    // Si no hay nombre en el texto (p. ej. está solo en el logo) se deja vacío: mejor vacío que un dato equivocado.
+    const monLinea = (t.match(/MONEDA\s*:?\s*([A-Za-zÁÉÓÚ\/\.$]+)/i) || [])[1] || '';
+    const usd = monLinea ? /d[óo]lar|usd|us\$/i.test(monLinea) : /d[óo]lares americanos|\bUSD\b|US\s?\$/i.test(t) && !/son:[^\n]*soles/i.test(t);
+    return { origen, tipo: /boleta/i.test(t) && !/factura/i.test(t) ? 'Boleta' : 'Factura', serie: m ? m[1].toUpperCase() : '', numero: m ? m[2] : '', fecha, moneda: usd ? 'USD' : 'PEN', proveedor: prov, ruc, lineas };
   }
 
   const cargarScript = src => new Promise((ok, no) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('No se pudo cargar el lector (¿hay internet?).')); document.head.appendChild(s); });
+  // Agrupa los textos por fila (misma altura) y los ordena de izquierda a derecha: cada producto queda en UNA línea.
+  function filasDesdeItems(items) {
+    const arr = items.filter(it => it.s && it.s.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
+    const filas = [];
+    arr.forEach(it => { const f = filas.find(r => Math.abs(r.y - it.y) <= 3); if (f) f.items.push(it); else filas.push({ y: it.y, items: [it] }); });
+    return filas.sort((a, b) => b.y - a.y).map(f => {
+      f.items.sort((a, b) => a.x - b.x);
+      let linea = '', fin = null;
+      f.items.forEach(it => { if (fin !== null) { const gap = it.x - fin; linea += gap > 8 ? '  ' : gap > 1 ? ' ' : ''; } linea += it.s.trim(); fin = it.x + (it.w || 0); });
+      return linea;
+    }).join('\n') + '\n';
+  }
+  // Nombre de empresa a partir del texto que el OCR lee en el logo (descarta direcciones, teléfonos y líneas con números).
+  function nombreDeLogo(texto) {
+    const ls = String(texto || '').split('\n').map(x => x.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9 .&\-]/g, ' ').replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
+    return ls.find(x => x.length >= 6 && x.split(' ').length >= 2 && /[A-Za-zÁÉÍÓÚÑ]{3}/.test(x) && !/\d{3,}/.test(x) && !RUIDO_NOMBRE.test(x)) || '';
+  }
+
   async function pdfATexto(file) {
     await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     const pdf = await window.pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-    let out = '', lienzo = null;
-    for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
-      const pg = await pdf.getPage(i), c = await pg.getTextContent(); let y = null, linea = '';
-      c.items.forEach(it => { const yy = Math.round(it.transform[5]); if (y !== null && Math.abs(yy - y) > 3) { out += linea + '\n'; linea = ''; } y = yy; linea += it.str + '  '; });
-      out += linea + '\n';
+    let out = '', lienzo = null, pg1 = null;
+    for (let i = 1; i <= Math.min(pdf.numPages, 8); i++) {
+      const pg = await pdf.getPage(i), c = await pg.getTextContent();
+      if (i === 1) pg1 = pg;
+      out += filasDesdeItems(c.items.map(it => ({ s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0 })));
       if (i === 1 && out.trim().length < 30) { const vp = pg.getViewport({ scale: 2 }); lienzo = document.createElement('canvas'); lienzo.width = vp.width; lienzo.height = vp.height; await pg.render({ canvasContext: lienzo.getContext('2d'), viewport: vp }).promise; }
     }
     if (lienzo) return { texto: await ocr(lienzo), ocr: true };   // PDF escaneado: sin texto, se lee como foto
-    return { texto: out, ocr: false };
+    // Muchas facturas llevan el nombre del emisor solo como imagen (logo): se lee la parte de arriba con OCR cuando haga falta.
+    const imagenACanvas = im => {   // imagen de pdf.js (RGB, RGBA o 1 bit) → canvas con fondo blanco
+      const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      if (im.bitmap) { ctx.drawImage(im.bitmap, 0, 0); return c; }
+      const n = im.width * im.height, d = ctx.createImageData(im.width, im.height), px = im.data;
+      if (px.length === n * 4) d.data.set(px);
+      else if (px.length === n * 3) for (let i = 0; i < n; i++) { d.data[i * 4] = px[i * 3]; d.data[i * 4 + 1] = px[i * 3 + 1]; d.data[i * 4 + 2] = px[i * 3 + 2]; d.data[i * 4 + 3] = 255; }
+      else { const fila = (im.width + 7) >> 3; if (px.length < fila * im.height) return null; for (let y = 0; y < im.height; y++) for (let x = 0; x < im.width; x++) { const v = (px[y * fila + (x >> 3)] >> (7 - (x & 7))) & 1 ? 255 : 0, k = (y * im.width + x) * 4; d.data[k] = d.data[k + 1] = d.data[k + 2] = v; d.data[k + 3] = 255; } }
+      const tmp = document.createElement('canvas'); tmp.width = im.width; tmp.height = im.height; tmp.getContext('2d').putImageData(d, 0, 0);
+      ctx.drawImage(tmp, 0, 0); return c;
+    };
+    const leerLogo = async () => {
+      // 1) Las imágenes incrustadas de la primera página (el logo del emisor), leídas a su tamaño real; los QR (cuadrados) van al final.
+      const OPS = window.pdfjsLib.OPS, ops = await pg1.getOperatorList(), nombres = [];
+      ops.fnArray.forEach((f, i) => { if (f === OPS.paintImageXObject || f === OPS.paintJpegXObject) nombres.push(ops.argsArray[i][0]); });
+      const imgs = [];
+      for (const n of nombres) { const im = await new Promise(res => { try { pg1.objs.get(n, res); } catch (e) { res(null); } }); if (im && im.width >= 80 && im.height >= 40) imgs.push(im); }
+      const cuadrada = im => Math.abs(im.width / im.height - 1) < 0.15;
+      imgs.sort((a, b) => (cuadrada(a) - cuadrada(b)) || (b.width * b.height - a.width * a.height));
+      for (const im of imgs.slice(0, 3)) {
+        const c = imagenACanvas(im); if (!c) continue;
+        const nm = nombreDeLogo(await ocr(c)); if (nm) return nm;
+      }
+      // 2) Plan B: la franja de arriba de la página con más resolución.
+      const vp = pg1.getViewport({ scale: 3 }), full = document.createElement('canvas'); full.width = vp.width; full.height = vp.height;
+      await pg1.render({ canvasContext: full.getContext('2d'), viewport: vp }).promise;
+      const crop = document.createElement('canvas'); crop.width = Math.round(full.width * 0.7); crop.height = Math.round(full.height * 0.22);
+      crop.getContext('2d').drawImage(full, 0, 0, crop.width, crop.height, 0, 0, crop.width, crop.height);
+      return nombreDeLogo(await ocr(crop));
+    };
+    return { texto: out, ocr: false, leerLogo };
   }
   async function ocr(fuente) {
     await cargarScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
@@ -73,11 +248,47 @@
     return r.data.text;
   }
 
-  async function leerArchivo(file) {
+  // Razón social por RUC con una API de consulta (SUNAT). El token y la URL los guarda el administrador en la base de datos (meta/rucApi), no en el código.
+  function nombreDeRespuesta(j) {
+    const d = (j && (j.data || j.result || j)) || {};
+    return String(d.razonSocial || d.razon_social || d.nombre_o_razon_social || d.nombreORazonSocial || d.nombre || d.name || '').trim();
+  }
+  async function consultarRuc(ruc, cfg) {
+    if (!cfg || !cfg.token || !/^\d{11}$/.test(String(ruc || ''))) return '';
+    const plantilla = cfg.url || 'https://api.apis.net.pe/v2/sunat/ruc?numero={ruc}';
+    const url = plantilla.replace('{ruc}', ruc).replace('{token}', encodeURIComponent(cfg.token));
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, to = ctl ? setTimeout(() => ctl.abort(), 8000) : null;
+    try {
+      const headers = { Accept: 'application/json' }; if (!plantilla.includes('{token}')) headers.Authorization = 'Bearer ' + cfg.token;
+      const r = await fetch(url, { headers, signal: ctl ? ctl.signal : undefined });
+      if (!r.ok) return '';
+      return nombreDeRespuesta(await r.json());
+    } catch (e) { return ''; } finally { if (to) clearTimeout(to); }
+  }
+
+  async function leerArchivo(file, onEstado, resolver) {
+    const completarPorRuc = async res => {   // el nombre del proveedor (razón social) se busca por su RUC
+      if (!res.proveedor && res.ruc && resolver) {
+        if (onEstado) onEstado('Buscando el proveedor por su RUC…');
+        try { const nm = await resolver(res.ruc); if (nm) { res.proveedor = nm; res.proveedorPorRuc = true; } } catch (e) { /* sigue con las otras opciones */ }
+      }
+      return res;
+    };
     const n = (file.name || '').toLowerCase(), t = file.type || '';
     if (n.endsWith('.xml') || t.includes('xml')) return parseXml(await file.text());
-    if (n.endsWith('.pdf') || t === 'application/pdf') { const r = await pdfATexto(file); return Object.assign(parseTexto(r.texto, r.ocr ? 'PDF escaneado (OCR)' : 'PDF'), { ocr: r.ocr }); }
-    if (t.startsWith('image/')) return Object.assign(parseTexto(await ocr(file), 'Foto (OCR)'), { ocr: true });
+    if (n.endsWith('.pdf') || t === 'application/pdf') {
+      const r = await pdfATexto(file), res = await completarPorRuc(Object.assign(parseTexto(r.texto, r.ocr ? 'PDF escaneado (OCR)' : 'PDF'), { ocr: r.ocr, texto: r.texto }));
+      if (!res.proveedor && r.leerLogo) {
+        if (onEstado) onEstado('Buscando el nombre del proveedor en el logo… (la primera vez puede tardar)');
+        try {
+          const tx = await Promise.race([r.leerLogo(), new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo')), 60000))]);
+          const nm = nombreDeLogo(tx);
+          if (nm) { res.proveedor = nm; res.proveedorOcr = true; }
+        } catch (e) { /* sin logo legible: el proveedor se escribe a mano */ }
+      }
+      return res;
+    }
+    if (t.startsWith('image/')) { const tx = await ocr(file); return completarPorRuc(Object.assign(parseTexto(tx, 'Foto (OCR)'), { ocr: true, texto: tx })); }
     throw new Error('Formato no soportado. Usa XML, PDF o una foto.');
   }
 
@@ -94,47 +305,75 @@
     return pts >= 0.5 ? mejor : '';
   }
 
-  // ── Modal de previsualización ──
-  function abrirPrevisualizacion(borrador, prods, alAprobar) {
+  // ── Modal de previsualización: todo lo leído (descripción, código, cantidad, precio) se ve y se puede corregir ──
+  function abrirPrevisualizacion(borrador, prods, alAprobar, buscarPorRuc) {
     document.getElementById('ciModal')?.remove();
     const activos = Object.entries(prods).filter(([, p]) => !p.deleted);
-    const opts = sel => '<option value="">— Elegir producto —</option><option value="__nuevo__"' + (sel === '__nuevo__' ? ' selected' : '') + '>＋ Crear como producto nuevo (con código y descripción de la factura)</option>' + activos.map(([c, p]) => `<option value="${esc(c)}"${c === sel ? ' selected' : ''}>${esc(c)} — ${esc(p.name || '')}</option>`).join('');
-    const filas = (borrador.lineas.length ? borrador.lineas : [{ codigo: '', desc: '', qty: 1, precio: 0 }]).map(l => `<tr data-cod="${esc(l.codigo || '')}" data-desc="${esc(l.desc || '')}">
-      <td data-label="Leído">${esc(l.desc || l.codigo || '—')}</td>
-      <td data-label="Producto"><select class="ci-prod">${opts(sugerirProducto(l, prods) || (l.desc ? '__nuevo__' : ''))}</select></td>
-      <td data-label="Cant."><input class="ci-qty" type="number" min="1" value="${l.qty || 1}"></td>
-      <td data-label="Precio c/IGV"><input class="ci-price" type="number" min="0" step="0.01" value="${l.precio || 0}"></td>
-      <td><button type="button" class="btn ci-del">Quitar</button></td></tr>`).join('');
+    const opts = sel => '<option value="">— Elegir producto —</option><option value="__nuevo__"' + (sel === '__nuevo__' ? ' selected' : '') + '>Producto nuevo</option>' + activos.map(([c, p]) => `<option value="${esc(c)}"${c === sel ? ' selected' : ''}>${esc(c)} — ${esc(p.name || '')}</option>`).join('');
+    const fila = l => `<tr><td class="ci-cell">
+      <div class="ci-top"><input class="ci-desc" placeholder="Descripción leída" value="${esc(l.desc || '')}"><button type="button" class="btn ci-del">Quitar</button></div>
+      <div class="ci-grid">
+        <label class="ci-f ci-f-prod"><span>Producto</span><select class="ci-prod">${opts(sugerirProducto(l, prods) || (l.desc || l.codigo ? '__nuevo__' : ''))}</select></label>
+        <label class="ci-f ci-nuevo"><span>Código</span><input class="ci-cod" placeholder="Automático si va vacío" value="${esc(l.codigo || '')}"></label>
+        <label class="ci-f ci-nuevo"><span>Origen</span><select class="ci-tipo"><option value="importado"${l.codigo ? ' selected' : ''}>Importado</option><option value="nacional"${l.codigo ? '' : ' selected'}>Nacional</option></select></label>
+        <label class="ci-f"><span>Cantidad</span><input class="ci-qty" type="number" min="1" value="${l.qty || 1}"></label>
+        <label class="ci-f"><span>Precio c/IGV</span><input class="ci-price" type="number" min="0" step="0.01" value="${l.precio || 0}"></label>
+        <div class="ci-f"><span>Importe</span><b class="ci-imp">S/ 0.00</b></div>
+      </div></td></tr>`;
+    const filas = (borrador.lineas.length ? borrador.lineas : [{ codigo: '', desc: '', qty: 1, precio: 0 }]).map(fila).join('');
+    const crudo = borrador.texto ? `<details class="bal-hint"><summary>Ver el texto que se leyó del archivo</summary><pre style="white-space:pre-wrap;max-height:160px;overflow:auto">${esc(borrador.texto)}</pre></details>` : '';
     const ov = document.createElement('div'); ov.id = 'ciModal'; ov.className = 'modal-overlay open';
     ov.innerHTML = `<div class="modal ci-modal" role="dialog" aria-modal="true">
-      <div class="modal-header"><div><h2>Revisa lo leído del comprobante</h2><p>Origen: ${esc(borrador.origen)} · Nada se guarda hasta que apruebes y pulses «Guardar compra».</p></div></div>
+      <div class="modal-header"><div><h2>Revisa lo leído del comprobante</h2><p>Origen: ${esc(borrador.origen)}</p></div></div>
       <div class="modal-body">
-        <div class="ci-warn">${borrador.ocr ? '⚠ Leído con reconocimiento de texto: puede haber errores. Revisa cada dato contra el documento.' : 'Compara con el documento antes de aprobar.'}</div>
+        <div class="ci-warn">${borrador.ocr ? '⚠ Leído por OCR: revisa cada dato.' : 'Compara con el documento y corrige lo que haga falta.'}${borrador.proveedorOcr ? ' El nombre del proveedor se leyó del logo: verifícalo.' : ''}${borrador.proveedorPorRuc ? ' Proveedor obtenido por su RUC.' : ''}${borrador.moneda === 'USD' ? ' Esta factura está en dólares: los precios se registran tal cual, sin convertir. Edítalos si los quieres en soles.' : ''}</div>
         <div class="bal-form">
-          <label class="bal-field"><span>Proveedor</span><input id="ciProv" value="${esc(borrador.proveedor)}"></label>
+          <label class="bal-field"><span>Proveedor <a href="#" id="ciProvBuscar" style="font-weight:500;font-size:12px;margin-left:6px">Buscar por RUC</a></span><input id="ciProv" placeholder="${borrador.proveedor ? '' : 'Escribe el proveedor (no se pudo leer)'}" value="${esc(borrador.proveedor)}"></label>
           <label class="bal-field"><span>RUC</span><input id="ciRuc" inputmode="numeric" maxlength="11" value="${esc(borrador.ruc)}"></label>
           <label class="bal-field"><span>Comprobante</span><select id="ciTipo"><option${borrador.tipo === 'Factura' ? ' selected' : ''}>Factura</option><option${borrador.tipo === 'Boleta' ? ' selected' : ''}>Boleta</option></select></label>
           <label class="bal-field"><span>Fecha</span><input id="ciFecha" type="date" value="${esc(borrador.fecha)}"></label>
           <label class="bal-field"><span>Serie</span><input id="ciSerie" value="${esc(borrador.serie)}"></label>
           <label class="bal-field"><span>Número</span><input id="ciNum" value="${esc(borrador.numero)}"></label>
+          <label class="bal-field"><span>Almacén donde se añade</span><select id="ciAlm"><option value="alm1">Almacén 1</option><option value="alm2">Almacén 2</option><option value="alm3">Almacén 3</option></select></label>
         </div>
         <h3 style="margin:14px 0 6px">Productos</h3>
-        <p class="bal-hint">Elige a qué producto de tu Stock corresponde cada línea. Si no está en tu Stock, déjalo como «producto nuevo»: se creará con el código y la descripción de la factura. Las líneas sin elegir se descartan.${borrador.lineas.length ? '' : ' No se detectaron líneas: agrégalas a mano en el formulario.'}</p>
-        <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Leído</th><th>Producto</th><th>Cant.</th><th>Precio c/IGV</th><th></th></tr></thead><tbody id="ciLineas">${filas}</tbody></table></div>
+        <p class="bal-hint">Elige el producto de cada línea, o deja «Producto nuevo» para crearlo con la descripción y el código que ves. Sin elegir = se descarta.${borrador.lineas.length ? '' : ' No se detectaron líneas: escríbelas aquí.'}</p>
+        ${crudo}
+        <div class="bal-scroll"><table class="bal-table"><tbody id="ciLineas">${filas}</tbody></table></div>
+        <button type="button" class="btn" id="ciAdd">+ Agregar línea</button>
+        <p id="ciTotal" class="bal-hint"></p>
       </div>
-      <div class="ci-actions"><button type="button" class="btn" id="ciCancel">Cancelar</button><button type="button" class="btn btn-primary" id="ciOk">Aprobar y pasar al formulario</button></div>
+      <div class="ci-actions"><button type="button" class="btn" id="ciCancel">Cancelar</button><button type="button" class="btn" id="ciOk">Solo rellenar el formulario</button><button type="button" class="btn btn-primary" id="ciGuardar">✓ Aprobar y registrar en stock</button></div>
     </div>`;
     document.body.appendChild(ov);
     const q = id => ov.querySelector('#' + id), cerrar = () => ov.remove();
+    const almForm = document.getElementById('cpAlm'); if (almForm) q('ciAlm').value = almForm.value;   // parte del que ya elegiste en el formulario
+    const refrescar = () => {
+      let total = 0;
+      q('ciLineas').querySelectorAll('tr').forEach(tr => {
+        tr.querySelector('.ci-nuevo').style.display = tr.querySelector('.ci-prod').value === '__nuevo__' ? '' : 'none';
+        const imp = r2((Number(tr.querySelector('.ci-qty').value) || 0) * (Number(tr.querySelector('.ci-price').value) || 0)); total += imp;
+        tr.querySelector('.ci-imp').textContent = 'S/ ' + imp.toFixed(2);
+      });
+      q('ciTotal').textContent = 'Total leído: S/ ' + r2(total).toFixed(2);
+    };
     ov.onclick = e => { if (e.target === ov) cerrar(); };
     q('ciCancel').onclick = cerrar;
-    q('ciLineas').onclick = e => { if (e.target.classList.contains('ci-del')) e.target.closest('tr').remove(); };
-    q('ciOk').onclick = () => {
-      const lineas = [...q('ciLineas').querySelectorAll('tr')].map(tr => ({ code: tr.querySelector('.ci-prod').value, qty: Number(tr.querySelector('.ci-qty').value), precio: Number(tr.querySelector('.ci-price').value), codigoNuevo: tr.dataset.cod, desc: tr.dataset.desc })).filter(l => l.code);
-      alAprobar({ proveedor: q('ciProv').value.trim(), ruc: q('ciRuc').value.trim(), tipo: q('ciTipo').value, fecha: q('ciFecha').value, serie: q('ciSerie').value.trim(), numero: q('ciNum').value.trim(), lineas });
+    q('ciProvBuscar').onclick = async e => { e.preventDefault(); if (!buscarPorRuc) return; const nm = await buscarPorRuc(q('ciRuc').value, true); if (nm) q('ciProv').value = nm; };
+    q('ciLineas').oninput = q('ciLineas').onchange = refrescar;
+    q('ciLineas').onclick = e => { if (e.target.classList.contains('ci-del')) { e.target.closest('tr').remove(); refrescar(); } };
+    q('ciAdd').onclick = () => { q('ciLineas').insertAdjacentHTML('beforeend', fila({ qty: 1, precio: 0 })); refrescar(); };
+    refrescar();
+    const aprobar = guardar => {
+      const lineas = [...q('ciLineas').querySelectorAll('tr')].map(tr => ({ code: tr.querySelector('.ci-prod').value, qty: Number(tr.querySelector('.ci-qty').value), precio: Number(tr.querySelector('.ci-price').value), codigoNuevo: tr.querySelector('.ci-cod').value.trim(), desc: tr.querySelector('.ci-desc').value.trim(), tipoNuevo: tr.querySelector('.ci-tipo').value })).filter(l => l.code);
+      if (guardar && !lineas.length) return alert('Elige al menos un producto antes de registrar la compra.');
+      if (lineas.some(l => l.code === '__nuevo__' && !l.desc)) return alert('Escribe la descripción de los productos nuevos.');
+      alAprobar({ proveedor: q('ciProv').value.trim(), ruc: q('ciRuc').value.trim(), tipo: q('ciTipo').value, fecha: q('ciFecha').value, serie: q('ciSerie').value.trim(), numero: q('ciNum').value.trim(), almacen: q('ciAlm').value, lineas }, guardar === true);
       cerrar();
     };
+    q('ciOk').onclick = () => aprobar(false);          // solo rellena el formulario
+    q('ciGuardar').onclick = () => aprobar(true);      // rellena y guarda la compra
   }
 
-  window.ComprasImport = { parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
+  window.ComprasImport = { consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
 })();

@@ -70,12 +70,17 @@
   table-layout: fixed;
 }
 .product-table th:nth-child(1), .product-table td:nth-child(1) { width: 4%;  }  /* checkbox */
-.product-table th:nth-child(2), .product-table td:nth-child(2) { width: 11%; }  /* código */
-.product-table th:nth-child(3), .product-table td:nth-child(3) { width: 20%; }  /* nombre */
-.product-table th:nth-child(4), .product-table td:nth-child(4) { width: 33%; }  /* descripción */
+.product-table th:nth-child(2), .product-table td:nth-child(2) { width: 10%; }  /* código */
+.product-table th:nth-child(3), .product-table td:nth-child(3) { width: 22%; }  /* nombre */
+.product-table th:nth-child(4), .product-table td:nth-child(4) { width: 22%; }  /* descripción */
 .product-table th:nth-child(5), .product-table td:nth-child(5) { width: 8%;  }  /* stock */
-.product-table th:nth-child(6), .product-table td:nth-child(6) { width: 12%; }  /* precio venta */
-.product-table th:nth-child(7), .product-table td:nth-child(7) { width: 12%; }  /* acciones */
+.product-table th:nth-child(6), .product-table td:nth-child(6) { width: 10%; }  /* precio venta */
+.product-table th:nth-child(7), .product-table td:nth-child(7) { width: 12%; }  /* costo compra */
+.product-table th:nth-child(8), .product-table td:nth-child(8) { width: 12%; }  /* acciones */
+.pt-actions { white-space: nowrap; text-align: right; }
+.pt-actions .btn { padding: 6px 8px; margin-left: 4px; }
+.pt-actions .stock-del-btn:hover { color: #c62828; border-color: #c62828; }
+.pt-cost { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; }
 .product-table thead th {
   text-align: left;
   font-size: 11px;

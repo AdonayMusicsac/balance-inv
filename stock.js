@@ -3,6 +3,19 @@
    ══════════════════════════════════════ */
 
 let productsCache = [];
+let costosCache = null;   // {code: {prom, ultimo}} — solo admin
+const _verCosto = () => typeof isAdmin === 'function' && isAdmin();
+function cargarCostosStock() {
+  if (!_verCosto() || typeof costosPorProducto !== 'function') return;
+  costosPorProducto().then(c => { costosCache = c; renderStockPage(); updateStats(); }).catch(() => {});
+}
+function costoHtml(p) {
+  const c = costosCache && costosCache[p.code];
+  if (!c || !c.q) return '<span class="pt-desc-empty">—</span>';
+  const pr = Number(p.price) || 0, mg = pr > 0 ? ` · margen ${Math.round((pr - c.prom) / pr * 100)}%` : '';
+  return `<span title="Último: S/ ${c.ultimo.toFixed(2)}${c.fecha ? ' (' + c.fecha + ')' : ''}">S/ ${c.prom.toFixed(2)}</span><small style="display:block;color:var(--text-3)">${mg.replace(' · ', '')}</small>`;
+}
+
 
 /* ── Almacenes (Stock por almacén) ──────────────────────
    currentWarehouse: '' = "Todos los almacenes" (comportamiento de
@@ -14,7 +27,12 @@ const WAREHOUSE_LABELS = { alm1: 'Almacén 1', alm2: 'Almacén 2', alm3: 'Almac�
 
 function getDisplayStock(p) {
   if (!currentWarehouse) return p.stock !== undefined ? p.stock : 0;
-  return (p.almacenes && p.almacenes[currentWarehouse]) || 0;
+  return normalizarAlmacenes(p)[currentWarehouse] || 0;
+}
+
+// Productos que "existen" en la vista actual: en un almacén solo se listan los que tienen cantidad ahí.
+function productosEnVista() {
+  return currentWarehouse ? productsCache.filter(p => getDisplayStock(p) > 0) : productsCache;
 }
 
 function switchWarehouse(whId) {
@@ -36,6 +54,8 @@ function switchWarehouse(whId) {
   if (importWh) importWh.style.display = (!showDefault && !isVendedor) ? '' : 'none';
   if (exportWh) exportWh.style.display = (!showDefault && !isVendedor) ? '' : 'none';
 
+  const addAlm = document.getElementById('addAlm');
+  if (addAlm) addAlm.value = currentWarehouse || 'alm1';
   stockRenderLimit = STOCK_PAGE_SIZE;
   renderProducts();
 }
@@ -121,8 +141,9 @@ function getFilteredProducts() {
   const q = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
   const origen = document.getElementById('origenFilter')?.value || '';
   const porOrigen = p => !origen || (origen === 'sin' ? !p.tipo : p.tipo === origen);
-  if (!q) return origen ? productsCache.filter(porOrigen) : productsCache;
-  return productsCache.filter(p => {
+  const base = productosEnVista();
+  if (!q) return origen ? base.filter(porOrigen) : base;
+  return base.filter(p => {
     if (!porOrigen(p)) return false;
     // displayProductCode() vuelve a convertir "⁄" en "/" antes de
     // comparar: si no, buscar "1/2" nunca encontraría un producto
@@ -135,7 +156,16 @@ function getFilteredProducts() {
 
 function origenTagHtml(p) {
   const t = p.tipo === 'importado' ? ['Importado', 'origen-imp'] : p.tipo === 'nacional' ? ['Nacional', 'origen-nac'] : ['Sin clasificar', 'origen-sin'];
-  return `<span class="origen-tag ${t[1]}">${t[0]}</span>`;
+  return `<span class="origen-mini ${t[1]}"><i></i>${t[0]}</span>`;
+}
+function precioHtml(price) { return Number(price) > 0 ? `S/ ${fmtPrice(price)}` : '<span class="pt-noprice">Sin precio</span>'; }
+
+const ICON_EDIT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+const ICON_DEL = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
+function deleteProductRow(code) {
+  if (!confirm(`¿Eliminar el producto ${displayProductCode(code)}? Esta acción no se puede deshacer.`)) return;
+  deleteProduct(code).catch(err => alert('No se pudo eliminar el producto: ' + err.message));
 }
 
 function productCardHtml(p) {
@@ -172,6 +202,7 @@ function productCardHtml(p) {
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
         </button>
+        ${_verCosto() ? `<button class="btn-icon-edit" title="Eliminar" onclick="deleteProductRow('${escapedCode}')">${ICON_DEL}</button>` : ''}
       </div>
       <div class="pc-mid">
         <div class="pc-name-wrap">
@@ -188,8 +219,9 @@ function productCardHtml(p) {
         </div>
         <div class="pc-bot-item">
           <span class="pc-lbl">Precio:</span>
-          <span class="pc-price">S/ ${fmtPrice(price)}</span>
+          <span class="pc-price">${precioHtml(price)}</span>
         </div>
+        ${(costosCache && costosCache[p.code]) ? `<div class="pc-bot-item"><span class="pc-lbl">Costo:</span><span class="pc-price">S/ ${costosCache[p.code].prom.toFixed(2)}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -214,21 +246,17 @@ function productRowHtml(p) {
   return `
     <tr data-code="${escapeHtml(code)}" class="${isChecked ? 'row-selected' : ''}">
       ${showCheckbox ? `<td class="col-check"><input type="checkbox" class="row-checkbox stock-check" data-code="${escapeHtml(code)}" ${isChecked} onchange="onStockCheckToggle(this)"></td>` : ''}
-      <td class="pt-code">${escapeHtml(displayProductCode(code))}</td>
-      <td class="pt-name">${escapeHtml(name)} ${origenTagHtml(p)}</td>
+      <td class="pt-code">${escapeHtml(displayProductCode(code))}${origenTagHtml(p)}</td>
+      <td class="pt-name">${escapeHtml(name)}</td>
       <td class="pt-desc">${desc ? escapeHtml(desc) : '<span class="pt-desc-empty">—</span>'}</td>
       <td class="pt-qty ${stockClass}">${stock}</td>
-      <td class="pt-price">S/ ${fmtPrice(price)}</td>
-      <td>
-        <button class="btn btn-ghost btn-sm stock-edit-btn" title="Editar"
-          onclick="${editOnclick}">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-          Editar
-        </button>
+      <td class="pt-price">${precioHtml(price)}</td>
+      <td class="pt-cost">${costoHtml(p)}</td>
+      <td class="pt-actions">
+        <button class="btn btn-ghost btn-sm stock-edit-btn" title="Editar" aria-label="Editar"
+          onclick="${editOnclick}">${ICON_EDIT}</button>
+        ${_verCosto() ? `<button class="btn btn-ghost btn-sm stock-del-btn" title="Eliminar" aria-label="Eliminar"
+          onclick="deleteProductRow('${escapedCode}')">${ICON_DEL}</button>` : ''}
       </td>
     </tr>
   `;
@@ -297,7 +325,7 @@ function setupStockInfiniteScroll(totalFiltered) {
   if (anchor.tagName === 'TBODY') {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 6;
+    td.colSpan = 8;
     td.appendChild(sentinel);
     tr.appendChild(td);
     anchor.appendChild(tr);
@@ -325,12 +353,18 @@ function renderProducts() {
 function updateStats() {
   const statTotal = document.getElementById('statTotal');
   if (!statTotal) return; // la vista de Stock no está montada ahora mismo
-  const total = productsCache.length;
-  const low   = productsCache.filter(p => getDisplayStock(p) <= 6).length;
-  const value = productsCache.reduce((sum, p) => sum + ((Number(p.price) || 0) * getDisplayStock(p)), 0);
+  const base  = productosEnVista();
+  const total = base.length;
+  const low   = base.filter(p => getDisplayStock(p) <= 6).length;
+  // Valor del inventario = lo que costó (costo de compra promedio × cantidad). Solo el admin conoce los costos.
+  const conCosto = p => costosCache && costosCache[p.code] && costosCache[p.code].q;
+  const value = base.reduce((sum, p) => sum + (conCosto(p) ? costosCache[p.code].prom * getDisplayStock(p) : 0), 0);
+  const sinCosto = base.filter(p => getDisplayStock(p) > 0 && !conCosto(p)).length;
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statLow').textContent   = low;
-  document.getElementById('statValue').textContent = `S/ ${value.toLocaleString('es-PE', { maximumFractionDigits: 0 })}`;
+  const sv = document.getElementById('statValue');
+  sv.textContent = costosCache ? `S/ ${value.toLocaleString('es-PE', { maximumFractionDigits: 2 })}` : '—';
+  sv.title = costosCache && sinCosto ? `${sinCosto} producto(s) con stock no tienen costo de compra registrado y no suman.` : '';
 }
 
 /* ── Firebase listener ── */
@@ -341,6 +375,11 @@ authReady.then(() => {
   watchProducts(list => {
     productsCache = list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
     renderProducts();
+    // Una vez por sesión (solo admin): deja el reparto por almacén cuadrando con el total, sin tocar el stock total.
+    if (!window._almRepararHecho && typeof isAdmin === 'function' && isAdmin() && typeof repararAlmacenes === 'function') {
+      window._almRepararHecho = true;
+      repararAlmacenes(productsCache).then(n => { if (n) console.info('[Almacenes] Reparto corregido en', n, 'producto(s).'); });
+    }
     // Aviso a otras vistas abiertas (ej. Nueva Nota) de que el stock
     // real acaba de cambiar, para que puedan refrescar sus propios
     // límites en vivo en vez de quedarse con el stock que había al
@@ -581,7 +620,8 @@ function addProduct() {
   if (productsCache.some(p => p.code === code))
     return alert(`Ya existe un producto con el código ${code}.`);
 
-  saveProduct(code, { name, desc, price, stock, category: 'general', tipo: tipoAdd }, undefined, true)
+  const almAdd = (document.getElementById('addAlm') || {}).value || currentWarehouse || 'alm1';
+  saveProduct(code, { name, desc, price, stock, category: 'general', tipo: tipoAdd, almacenes: repartoInicial(stock, almAdd) }, undefined, true)
     .then(() => {
       closeModal('addModal');
       ['addName','addCode','addDesc','addStock','addPrice'].forEach(id => {
@@ -693,7 +733,7 @@ function updateBulkStock() {
   if (countEl) countEl.textContent = `${count} producto${count !== 1 ? 's' : ''} seleccionado${count !== 1 ? 's' : ''}`;
 
   // Actualizar label exportar
-  const total    = productsCache.length;
+  const total    = productosEnVista().length;
   const filtered = getFilteredProducts().length;
   const lbl = document.getElementById('exportStockLabel');
   if (lbl) {
@@ -827,5 +867,8 @@ window.Stock = {
     // llama a renderProducts() internamente.
     switchWarehouse('');
     applyStockRoleRestrictions();
+    if (!document.getElementById('stockCostStyle')) { const st = document.createElement('style'); st.id = 'stockCostStyle'; document.head.appendChild(st); }
+    document.getElementById('stockCostStyle').textContent = _verCosto() ? '' : '.product-table .col-cost, .product-table .pt-cost { display: none !important; }';
+    cargarCostosStock();
   }
 };

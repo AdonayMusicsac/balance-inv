@@ -642,7 +642,7 @@ async function processImportStock() {
         var chunk = toUpdate.slice(i, i + batchSize);
         await Promise.all(chunk.map(async function(r) {
           try {
-            await Promise.all([ addStock(r.code, r.stock), saveProduct(r.code, { price: r.price }) ]);
+            await Promise.all([ addStockConAlmacen(r.code, r.stock), saveProduct(r.code, { price: r.price }) ]);
             realUpdated++;
           } catch (innerErr) {
             realFailed++;
@@ -655,7 +655,7 @@ async function processImportStock() {
         var chunk = toUpdate.slice(i, i + batchSize);
         await Promise.all(chunk.map(async function(r) {
           try {
-            await addStock(r.code, r.stock);
+            await addStockConAlmacen(r.code, r.stock);
             realUpdated++;
           } catch (innerErr) {
             realFailed++;

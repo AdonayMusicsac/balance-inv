@@ -50,9 +50,16 @@ function escapeHtml(str) {
 // la comilla doble libre para romper el atributo HTML completo e
 // inyectar attributes/tags nuevos. Acá se escapan ambas capas.
 function escapeJsAttr(str) {
+  // Orden importante: primero la capa JS (\\ y '), luego la capa HTML
+  // empezando por '&' (si no, "&#39;" se decodifica a "'" y rompe el string).
   return String(str ?? '')
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+    .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -386,6 +393,72 @@ function refreshProductsNow() {
   return Promise.resolve();
 }
 
+
+// =========================================================
+// ALMACENES: una sola regla para todo el sistema
+// =========================================================
+// /products/{code}/stock es el TOTAL y debe ser siempre la suma de /almacenes/alm1+alm2+alm3.
+// Un producto sin `almacenes` (creado a mano o importado antes) se considera entero en Almacén 1.
+const _ALM_IDS = ['alm1', 'alm2', 'alm3'];
+function normalizarAlmacenes(p) {
+  p = p || {};
+  const total = Math.max(0, Number(p.stock) || 0);
+  if (!p.almacenes) return { alm1: total, alm2: 0, alm3: 0 };
+  const o = {}; _ALM_IDS.forEach(id => { o[id] = Math.max(0, Number(p.almacenes[id]) || 0); });
+  return o;
+}
+// Reparto con el que se guarda un producto nuevo: todo el stock en el almacén elegido.
+function repartoInicial(stock, alm) {
+  const o = { alm1: 0, alm2: 0, alm3: 0 }; o[_ALM_IDS.includes(alm) ? alm : 'alm1'] = Math.max(0, Number(stock) || 0); return o;
+}
+// Si el producto aún no tiene reparto, crea uno con lo que había antes del cambio (stockPrevio) en Almacén 1.
+async function asegurarAlmacenes(code, stockPrevio) {
+  const ref = refProducts.child(code);
+  if ((await ref.child('almacenes').get()).exists()) return;
+  const previo = stockPrevio != null ? stockPrevio : Number((await ref.child('stock').get()).val()) || 0;
+  await ref.child('almacenes').transaction(cur => cur || repartoInicial(Math.max(0, previo), 'alm1'));
+}
+// Aplica un cambio de cantidad TOTAL (delta) al reparto: suma al almacén indicado (por defecto Almacén 1); resta de ese y luego de los demás.
+async function aplicarDeltaAlmacenes(code, delta, alm) {
+  delta = Number(delta) || 0; if (!delta) return;
+  const ref = refProducts.child(code);
+  const total = Number((await ref.child('stock').get()).val()) || 0;
+  await asegurarAlmacenes(code, Math.max(0, total - delta));
+  const al = ref.child('almacenes'), destino = _ALM_IDS.includes(alm) ? alm : 'alm1';
+  if (delta > 0) await al.child(destino).transaction(cur => (Number(cur) || 0) + delta);
+  else {
+    let resto = -delta;
+    for (const id of [destino, ..._ALM_IDS.filter(x => x !== destino)]) {
+      if (resto <= 0) break;
+      let t = 0; await al.child(id).transaction(cur => { cur = Number(cur) || 0; t = Math.min(cur, resto); return cur - t; }); resto -= t;
+    }
+  }
+  await ref.update({ updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
+}
+// Importar sumando cantidad: suma al total Y al reparto (Almacén 1 salvo que se indique otro).
+async function addStockConAlmacen(code, qty, alm) {
+  const r = await addStock(code, qty);
+  await aplicarDeltaAlmacenes(code, qty, alm);
+  return r;
+}
+// Repara productos cuyo reparto no cuadra con el total (el TOTAL manda: lo usan las ventas). No cambia el stock total ni crea movimientos.
+async function repararAlmacenes(lista) {
+  let arreglados = 0;
+  for (const p of lista || []) {
+    try {
+      const n = normalizarAlmacenes(p), suma = n.alm1 + n.alm2 + n.alm3, total = Math.max(0, Number(p.stock) || 0);
+      const ok = p.almacenes && suma === total && _ALM_IDS.every(id => p.almacenes[id] === n[id]);
+      if (ok) continue;
+      let dif = total - suma;
+      if (dif > 0) n.alm1 += dif;
+      else for (const id of _ALM_IDS) { if (dif >= 0) break; const t = Math.min(n[id], -dif); n[id] -= t; dif += t; }
+      await refProducts.child(p.code).update({ almacenes: n, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+      arreglados++;
+    } catch (e) { console.error('[Almacenes] No se pudo reparar', p.code, e); }
+  }
+  return arreglados;
+}
+
 // Antes: "Guardar cambios" en el modal de Editar producto hacía un
 // set() completo, incluyendo el stock que estaba cargado en el
 // formulario desde que se abrió el modal. Si mientras tanto alguien
@@ -432,7 +505,7 @@ function saveProduct(code, data, expectedStock, isNew) {
     // siempre, porque el nodo viejo seguía ahí aunque oculto.
     return productRef.transaction(current => {
       if (current !== null && !current.deleted) return; // aborta: el código ya existe y sigue activo
-      return { ...rest, stock };
+      return { ...rest, stock, almacenes: rest.almacenes || repartoInicial(stock, 'alm1') };
     }).then(result => {
       if (!result.committed) {
         throw new Error(
@@ -448,7 +521,10 @@ function saveProduct(code, data, expectedStock, isNew) {
     // masivo actualizando solo precio/nombre en un producto que ya
     // existe) — se escribe directo, no hace falta transacción
     // porque no hay nada con lo que pueda chocar.
-    return productRef.update({ ...rest, stock });
+    return productRef.child('stock').get().then(sn => {
+      const antes = Number(sn.val()) || 0, existe = sn.exists();
+      return productRef.update({ ...rest, stock }).then(() => existe && Number(stock) !== antes ? aplicarDeltaAlmacenes(code, Number(stock) - antes) : undefined);
+    });
   }
 
   const fieldsUpdate = productRef.update(rest);
@@ -464,7 +540,8 @@ function saveProduct(code, data, expectedStock, isNew) {
     }
   });
 
-  return Promise.all([fieldsUpdate, stockUpdate]).then(res => {
+  const almUpdate = stockUpdate.then(() => Number(stock) !== Number(expectedStock) ? aplicarDeltaAlmacenes(code, Number(stock) - Number(expectedStock)) : undefined);
+  return Promise.all([fieldsUpdate, stockUpdate, almUpdate]).then(res => {
     if (!isNew && stock !== undefined && expectedStock !== undefined && Number(stock) !== Number(expectedStock) && typeof registrarAjusteManual === 'function') registrarAjusteManual(code, Number(expectedStock), Number(stock)).catch(e => console.error('Ajuste:', e));
     return res;
   });
@@ -622,7 +699,24 @@ async function addStockWithRetry(code, qty, attempts) {
   );
 }
 
+// Mantiene "stock == suma de almacenes" al vender: solo si el producto tiene `almacenes`; descuenta de Almacén 1 en adelante.
+async function _tomarAlmacenes(code, qty) {
+  const tomado = {};
+  const al = refProducts.child(code).child('almacenes');
+  if (!(await al.get()).exists()) return tomado;
+  let resto = qty;
+  for (const id of ['alm1', 'alm2', 'alm3']) {
+    if (resto <= 0) break;
+    let t = 0;
+    await al.child(id).transaction(cur => { cur = Number(cur) || 0; t = Math.min(cur, resto); return cur - t; });
+    if (t > 0) { tomado[id] = t; resto -= t; }
+  }
+  return tomado;
+}
 async function decrementStock(items) {
+  items.forEach(item => {
+    if (!Number.isInteger(item.qty) || item.qty <= 0) throw new Error(`Cantidad inválida para ${item.code}: debe ser un entero mayor a 0.`);
+  });
   const results = await Promise.all(items.map(async item => {
     const stockRef = refProducts.child(item.code).child('stock');
     const result = await stockRef.transaction(current => {
@@ -630,13 +724,15 @@ async function decrementStock(items) {
       if (currentStock < item.qty) return; // aborta: no hay suficiente
       return currentStock - item.qty;
     });
+    let alm = {};
     if (result.committed) {
+      alm = await _tomarAlmacenes(item.code, item.qty);
       // Igual que en addStock: bump de updatedAt en paralelo, fuera de
       // la transacción, para que la venta se refleje en la próxima
       // sincronización incremental de watchProducts.
       refProducts.child(item.code).update({ updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
     }
-    return { code: item.code, qty: item.qty, ok: result.committed, newStock: result.snapshot ? result.snapshot.val() : null };
+    return { code: item.code, qty: item.qty, alm, ok: result.committed, newStock: result.snapshot ? result.snapshot.val() : null };
   }));
 
   const failed    = results.filter(r => !r.ok);
@@ -654,7 +750,10 @@ async function decrementStock(items) {
     // Ahora, si algo falla, se revierte (con reintentos, y avisando
     // fuerte si aun así no se puede) lo que sí se había descontado,
     // para que la operación sea todo-o-nada de verdad.
-    await Promise.all(succeeded.map(r => addStockWithRetry(r.code, r.qty)));
+    await Promise.all(succeeded.map(async r => {
+      await addStockWithRetry(r.code, r.qty);
+      for (const [id, q] of Object.entries(r.alm || {})) await refProducts.child(r.code).child('almacenes').child(id).transaction(cur => (Number(cur) || 0) + q).catch(() => {});
+    }));
 
     const err = new Error(
       'Stock insuficiente para: ' + failed.map(f => f.code).join(', ') +
@@ -688,7 +787,7 @@ const WAREHOUSES = [
 function updateWarehouseStock(code, whId, newQty, expectedQty) {
   const productRef = refProducts.child(code);
   const before = expectedQty || 0;
-  return productRef.child('almacenes').child(whId).transaction(current => {
+  return asegurarAlmacenes(code).then(() => productRef.child('almacenes').child(whId).transaction(current => {
     if ((current || 0) !== before) return; // aborta: cambió mientras se editaba
     return newQty;
   }).then(result => {
@@ -701,7 +800,7 @@ function updateWarehouseStock(code, whId, newQty, expectedQty) {
     const delta = newQty - before;
     return productRef.child('stock').transaction(current => (current || 0) + delta)
       .then(() => productRef.update({ updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {}));
-  });
+  }));
 }
 
 // Suma qty a un almacén de un producto (usado por la importación de
@@ -716,10 +815,12 @@ function addWarehouseStock(code, whId, qty) {
       err.productDeleted = true;
       throw err;
     }
-    const almUpdate = productRef.child('almacenes').child(whId).transaction(current => (current || 0) + qty);
-    const stockUpdate = productRef.child('stock').transaction(current => (current || 0) + qty);
-    const touch = productRef.update({ updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
-    return Promise.all([almUpdate, stockUpdate, touch]);
+    return asegurarAlmacenes(code).then(() => {
+      const almUpdate = productRef.child('almacenes').child(whId).transaction(current => (current || 0) + qty);
+      const stockUpdate = productRef.child('stock').transaction(current => (current || 0) + qty);
+      const touch = productRef.update({ updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
+      return Promise.all([almUpdate, stockUpdate, touch]);
+    });
   });
 }
 
@@ -1096,7 +1197,8 @@ async function seedIfEmpty() {
 // vez que conectes el proyecto Firebase real de BALANCE-INV, borra o
 // comenta esta línea (o simplemente reemplaza mock-sdk.js, y ya no
 // se ejecutará contra tu base real salvo que tú la llames a mano).
-seedIfEmpty();
+// Desactivado en producción: sembraría productos de ejemplo en tu base real. Solo con window.BALANCE_DEMO = true.
+if (typeof window !== 'undefined' && window.BALANCE_DEMO === true) seedIfEmpty();
 
 // =========================================================
 // USUARIOS (cuentas individuales de vendedor + admin)
