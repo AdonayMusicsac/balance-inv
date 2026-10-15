@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BALANCE-INV</title>
+<!-- BLOQUEANTE A PROPÓSITO (sin defer/async): oculta la página de
+     inmediato, antes de que el navegador pinte NADA. Esto es lo que
+     realmente evita el "flash" de contenido sin sesión — depender
+     solo de auth-guard.js (que es defer) no lo garantiza, porque
+     ese script puede ejecutarse después de que el navegador ya
+     pintó algo. Esta línea SIEMPRE corre primero. -->
+<script>
+document.documentElement.style.visibility = 'hidden';
+if (localStorage.getItem('balanceinv_pref_tema') === 'oscuro') {
+  document.documentElement.classList.add('theme-dark');
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="variables.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="balance.css">
+<link rel="stylesheet" href="stock-card.css">
+<link rel="stylesheet" href="import.css">
+<link rel="stylesheet" href="nueva-nota.css">
+<script src="firebase-config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar: fijo, nunca se recarga ── -->
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z"/><path d="M12 8l4 2.3v4.4L12 17l-4-2.3v-4.4L12 8z" fill="var(--sb-bg)" stroke="none"/></svg>
+        </div>
+        <div>
+          <div class="brand-name">BALANCE-INV</div>
+          <div class="brand-sub"><span class="status-dot"></span>Sistema activo</div>
+        </div>
+      </div>
+      <!-- El botón de cerrar sesión de arriba se quitó: ya existe
+           "Cerrar sesión" (junto con "Cambiar de cuenta") en el menú
+           de la tarjeta de usuario, abajo del sidebar. -->
+
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Resumen</div>
+      <a class="nav-item" data-page="dashboard" href="#dashboard">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        Dashboard
+      </a>
+      <div class="nav-section-label">Gestión</div>
+      <a class="nav-item" data-page="stock" href="#stock">
+        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="6" height="6" rx="1"/><rect x="9" y="3" width="13" height="2" rx="1"/><rect x="9" y="7" width="8" height="2" rx="1"/><rect x="2" y="11" width="6" height="6" rx="1"/><rect x="9" y="11" width="13" height="2" rx="1"/><rect x="9" y="15" width="8" height="2" rx="1"/></svg>
+        Stock
+      </a>
+      <a class="nav-item" data-page="pedidos" href="#pedidos">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Notas de Pedido
+      </a>
+      <a class="nav-item" data-page="compras" href="#compras"><svg viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>
+        Compras
+      </a>
+      <a class="nav-item" data-page="movimientos" href="#movimientos"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        Balance y alertas
+      </a>
+      <a class="nav-item" data-page="catalogo" href="#catalogo"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        Catálogo
+      </a>
+      <div class="nav-section-label">Historial</div>
+      <a class="nav-item" data-page="historial" href="#historial">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Historial
+      </a>
+      <div class="nav-section-label nav-admin-only">Administración</div>
+      <a class="nav-item nav-admin-only" data-page="registros" href="#registros">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Registros
+      </a>
+      <div class="nav-section-label">Cuenta</div>
+      <a class="nav-item" data-page="perfil" href="#perfil">
+        <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Mi perfil
+      </a>
+      <a class="nav-item" data-page="configuracion" href="#configuracion">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Configuración
+      </a>
+      <a class="nav-item" data-page="soporte" href="#soporte">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 2-3 4"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Soporte
+      </a>
+      <a class="nav-item nav-item-logout" id="logoutNavItem" href="#">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Salir
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-card-wrap">
+        <div class="user-card" id="userCard">
+          <div class="avatar">AD</div>
+          <div>
+            <div class="user-name">Cargando…</div>
+            <div class="user-role"></div>
+          </div>
+          <button class="user-menu-toggle" id="userMenuToggle" type="button" title="Opciones de cuenta" aria-label="Opciones de cuenta">
+            <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+          </button>
+        </div>
+        <div class="user-menu" id="userMenu" style="display:none">
+          <button type="button" class="user-menu-item" id="switchAccountBtn">
+            <svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            Cambiar de cuenta
+          </button>
+          <button type="button" class="user-menu-item danger" id="logoutBtn">
+            <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Aquí se inyecta cada vista (main + sus modales) ── -->
+  <div id="viewRoot"></div>
+
+</div>
+
+<!-- Indicador chico de "cambiando de sección", NO pantalla en blanco -->
+<div id="viewLoading" style="display:none;position:fixed;top:14px;right:14px;z-index:9999;background:var(--ink);color:#fff;padding:6px 14px;border-radius:999px;font-size:11.5px;font-weight:600;box-shadow:var(--shadow)">
+  Cargando…
+</div>
+
+<script src="firebase.js" defer></script>
+<script src="auth-guard.js" defer></script>
+<script src="nav.js" defer></script>
+<script src="selection.js" defer></script>
+<script src="router.js" defer></script>
+
+<!-- Lógica de cada sección — se cargan UNA sola vez, sus conexiones
+     a Firebase quedan vivas para siempre mientras uses la app. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+<script src="cloudinary-config.js"></script>
+<script src="cloudinary.js" defer></script>
+<script src="balance-logic.js" defer></script>
+<script src="compras-import.js" defer></script>
+<script src="qrcode-generator.js" defer></script>
+<script src="catalogo-copia.js" defer></script>
+<script src="catalogo-logic.js" defer></script>
+<script src="dashboard-logic.js" defer></script>
+<script src="stock.js" defer></script>
+<script src="import-stock.js" defer></script>
+<script src="pedidos-logic.js" defer></script>
+<script src="import-clientes.js" defer></script>
+<script src="historial-logic.js" defer></script>
+<script src="historial-actions.js" defer></script>
+<script src="nueva-nota-logic.js" defer></script>
+<script src="nueva-nota-actions.js" defer></script>
+<script src="registros-logic.js" defer></script>
+<script src="perfil-logic.js" defer></script>
+<script src="configuracion-logic.js" defer></script>
+<script src="soporte-logic.js" defer></script>
+
+<script defer>
+  document.addEventListener('DOMContentLoaded', () => {
+    authReady.then(() => {
+      Router.start();
+    });
+  });
+</script>
+</body>
+</html>

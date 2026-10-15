@@ -1,0 +1,107 @@
+/* =========================================================
+   BALANCE-INV — Design Tokens
+   =========================================================
+   Paleta propia de BALANCE-INV (verde botella + cobre), distinta a la
+   identidad de Musical Fever. Las fuentes se cargan con <link> en
+   cada HTML para no bloquear el render — este archivo solo define
+   tokens.
+   ========================================================= */
+
+:root {
+  /* Brand */
+  --accent:        #0F6E5C;
+  --accent-hover:  #0B5749;
+  --accent-soft:   rgba(15, 110, 92, 0.09);
+  --accent-border: rgba(15, 110, 92, 0.28);
+
+  /* Ink — para acciones primarias (Confirmar, Guardar, +Nota...).
+     El cobre queda reservado como acento secundario/de marca. */
+  --ink:        #1C1A17;
+  --ink-hover:  #2B2823;
+  --ink-soft:   rgba(28, 26, 23, 0.06);
+  --copper:     #C46A32;
+  --copper-bg:  rgba(196, 106, 50, 0.10);
+
+  /* Sidebar */
+  --sb-bg:          #12201C;
+  --sb-surface:     #17281F;
+  --sb-hover:       #1E332A;
+  --sb-active:      #234436;
+  --sb-text:        #7C9C8E;
+  --sb-text-hi:     #DCEAE3;
+  --sb-border:      rgba(255,255,255,0.05);
+
+  /* Surface */
+  --bg:             #F3F1EA;
+  --surface:        #FFFFFF;
+  --surface-2:      #F8F6EF;
+  --border:         #E7E2D3;
+  --border-strong:  #D5CDB6;
+
+  /* Text */
+  --text-1:  #1A1D1B;
+  --text-2:  #52584F;
+  --text-3:  #8A9088;
+
+  /* Status */
+  --green:   #1E8A5F;
+  --green-bg:#E9F6EE;
+  --amber:   #C48A1A;
+  --red:     #C3462F;
+  --red-bg:  #FBEBE7;
+
+  /* Radius */
+  --r:    10px;
+  --r-sm: 7px;
+  --r-lg: 14px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 3px rgba(26,29,27,0.08), 0 1px 2px rgba(26,29,27,0.04);
+  --shadow:    0 4px 12px rgba(26,29,27,0.10), 0 1px 3px rgba(26,29,27,0.05);
+  --shadow-lg: 0 16px 40px rgba(26,29,27,0.16), 0 4px 12px rgba(26,29,27,0.08);
+
+  /* Fonts — Sora y JetBrains Mono, cargadas vía <link> en cada HTML */
+  --font-ui:   'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* Transitions */
+  --t: 0.09s ease;
+}
+
+/* =========================================================
+   Tema oscuro — se activa agregando la clase "theme-dark" al
+   <html> (ver el script bloqueante en index.html y Configuración).
+   Solo se redefinen los tokens de superficie/texto/estado: el
+   sidebar ya es oscuro en ambos temas (paleta --sb-*, sin cambios
+   acá), así que en la práctica solo cambia el área de contenido.
+   ========================================================= */
+:root.theme-dark {
+  --surface:        #1C221D;
+  --surface-2:       #242B24;
+  --bg:              #141813;
+  --border:          #333B31;
+  --border-strong:   #454F41;
+
+  --text-1:  #ECEBE3;
+  --text-2:  #ABB2A5;
+  --text-3:  #798076;
+
+  /* Los botones/acentos "ink" (Confirmar, Guardar, Ver detalle...)
+     usaban un casi-negro pensado para contrastar con fondos claros.
+     Sobre fondo oscuro ese mismo tono se pierde contra la tarjeta,
+     así que en este tema toman el verde de marca en su lugar. */
+  --ink:        #14806B;
+  --ink-hover:  #0F6E5C;
+  --ink-soft:   rgba(20, 128, 107, 0.16);
+
+  --accent-soft:   rgba(20, 128, 107, 0.18);
+  --accent-border: rgba(20, 128, 107, 0.45);
+
+  --green-bg:  rgba(30, 138, 95, 0.2);
+  --red-bg:    rgba(195, 70, 47, 0.2);
+  --copper-bg: rgba(196, 106, 50, 0.2);
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow:    0 4px 14px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.25);
+  --shadow-lg: 0 18px 44px rgba(0,0,0,0.5), 0 4px 14px rgba(0,0,0,0.3);
+}

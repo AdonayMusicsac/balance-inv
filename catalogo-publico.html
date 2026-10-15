@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catálogo</title>
+
+<meta property="og:title" content="Catálogo">
+<meta property="og:description" content="Mirá los productos disponibles.">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="variables.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script src="firebase-config.js"></script>
+<style>
+  /* =========================================================
+     Catálogo público — BALANCE-INV
+     =========================================================
+     Página standalone (no pasa por router.js ni por el login): la abre
+     cualquier cliente con el link que se genera en la pantalla Catálogo.
+
+     Muestra SOLO nombre, foto, categoría y si hay disponible — nunca
+     precio, costo ni cantidades. No es una limitación de esta pantalla:
+     el nodo catalogoPublico que lee ni siquiera TIENE esos campos (ver
+     sincronizarCatalogoPublico() en catalogo-logic.js).
+     ========================================================= */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-ui);
+    background: var(--bg);
+    color: var(--text-1);
+    min-height: 100vh;
+  }
+  .cp-header {
+    background: var(--ink);
+    color: #fff;
+    padding: 28px 20px 24px;
+    text-align: center;
+  }
+  .cp-header h1 {
+    margin: 0 0 4px;
+    font-size: 22px;
+    font-weight: 800;
+  }
+  .cp-header p {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255,255,255,0.65);
+  }
+  .cp-wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 20px 16px 60px;
+  }
+  .cp-search {
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto 22px;
+    display: block;
+    padding: 11px 14px;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    color: var(--text-1);
+  }
+  .cp-search:focus { outline: 2px solid var(--accent-border); }
+  .cp-toolbar {
+    max-width: 720px;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .cp-cats {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    flex: 1;
+    scrollbar-width: none;
+  }
+  .cp-cats::-webkit-scrollbar { display: none; }
+  .cp-cat-chip {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .cp-cat-chip.active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+  }
+  .cp-fav-toggle {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .cp-fav-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+  .cp-fav-toggle.active { background: #FEE2E2; border-color: #FCA5A5; color: #DC2626; }
+  .cp-fav-toggle.active svg { fill: #DC2626; stroke: #DC2626; }
+  .cp-sort {
+    flex-shrink: 0;
+    padding: 7px 10px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+  }
+  .cp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 14px;
+  }
+  .cp-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: box-shadow 0.3s, border-color 0.3s;
+  }
+  .cp-item-resaltado {
+    box-shadow: 0 0 0 3px var(--accent-border);
+    border-color: var(--accent);
+  }
+  .cp-thumb {
+    aspect-ratio: 1 / 1;
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+  .cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cp-thumb svg { width: 34px; height: 34px; stroke: var(--text-3); fill: none; stroke-width: 1.5; }
+  .cp-agotado-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(20,20,20,0.85);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .cp-item.agotado .cp-thumb img { opacity: 0.45; filter: grayscale(40%); }
+  .cp-fav-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .cp-fav-btn svg { width: 16px; height: 16px; fill: none; stroke: var(--text-2); stroke-width: 2; }
+  .cp-fav-btn.activo svg { fill: #DC2626; stroke: #DC2626; }
+  .cp-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .cp-cat-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .cp-cat { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.03em; }
+  .cp-share-btn {
+    border: none;
+    background: none;
+    padding: 2px;
+    cursor: pointer;
+    color: var(--text-3);
+    display: flex;
+    flex-shrink: 0;
+  }
+  .cp-share-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+  .cp-share-btn:hover { color: var(--text-1); }
+  .cp-name { font-size: 13.5px; font-weight: 600; color: var(--text-1); line-height: 1.3; }
+  .cp-ask {
+    margin-top: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .cp-ask svg { width: 14px; height: 14px; }
+  .cp-ask:hover { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+  .cp-empty, .cp-loading, .cp-error {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-3);
+    font-size: 14px;
+  }
+  .cp-error { color: var(--red); }
+  .cp-fab-wa {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--green);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    text-decoration: none;
+  }
+  .cp-fab-wa svg { width: 26px; height: 26px; fill: #fff; }
+  .cp-footer {
+    text-align: center;
+    padding: 24px 16px 40px;
+    font-size: 11.5px;
+    color: var(--text-3);
+  }
+
+  /* ── Visor con zoom ── */
+  .cp-lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,10,0.94);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    overscroll-behavior: contain;
+  }
+  .cp-lightbox.open { display: flex; }
+  .cp-lightbox-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.12);
+    border: none;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .cp-lightbox-close svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .cp-lightbox-img-wrap {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .cp-lightbox img {
+    max-width: 92%;
+    max-height: 82%;
+    object-fit: contain;
+    /* touch-action:none le dice al navegador "no hagas VOS el pan/
+       zoom nativo acá" — lo maneja el JS de abajo a mano, para poder
+       combinar pellizco + arrastre + doble tap en un solo gesto sin
+       que compitan entre sí. */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    will-change: transform;
+  }
+  .cp-lightbox-caption {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    padding: 0 16px;
+    pointer-events: none;
+  }
+  .cp-lightbox-hint {
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    color: rgba(255,255,255,0.55);
+    font-size: 11.5px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="cp-header">
+  <h1 id="cpNombre">Catálogo</h1>
+  <p id="cpSubtitulo">Cargando…</p>
+</div>
+
+<div class="cp-wrap">
+  <input class="cp-search" id="cpSearchInput" type="text" placeholder="Buscar producto…" oninput="filtrarCatalogoPublico()" style="display:none">
+  <div class="cp-toolbar" id="cpToolbar" style="display:none">
+    <div class="cp-cats" id="cpCats"></div>
+    <button type="button" class="cp-fav-toggle" id="cpFavToggle" onclick="toggleSoloFavoritosPublico(this)" aria-label="Ver solo favoritos">
+      <svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.8 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+      Favoritos
+    </button>
+    <select class="cp-sort" id="cpSortSelect" onchange="filtrarCatalogoPublico()">
+      <option value="reciente">Más reciente</option>
+      <option value="nombre">Nombre A-Z</option>
+    </select>
+  </div>
+  <div id="cpContenido">
+    <p class="cp-loading">Cargando catálogo…</p>
+  </div>
+</div>
+
+<a id="cpFabWa" class="cp-fab-wa" style="display:none" target="_blank" rel="noopener">
+  <svg viewBox="0 0 24 24"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.69.44 3.34 1.28 4.79L2 22l5.44-1.43a9.9 9.9 0 0 0 4.6 1.17h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.87 9.87 0 0 0 12.04 2m0 1.67c2.2 0 4.27.86 5.82 2.42a8.2 8.2 0 0 1 2.41 5.82c0 4.54-3.7 8.24-8.24 8.24a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.12.82.84-3.04-.2-.31a8.18 8.18 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.24-8.24m-4.6 4.64c-.16 0-.42.06-.64.31s-.85.83-.85 2.02.87 2.35.99 2.51c.12.16 1.7 2.6 4.13 3.63 2.02.86 2.44.7 2.88.65s1.42-.58 1.62-1.14.2-1.04.14-1.14-.22-.16-.46-.28-1.42-.7-1.64-.78-.38-.12-.54.12-.62.78-.76.94-.28.18-.52.06a6.6 6.6 0 0 1-1.94-1.2 7.3 7.3 0 0 1-1.34-1.67c-.14-.24-.01-.37.11-.49.11-.11.24-.28.36-.42s.16-.24.24-.4.04-.3-.02-.42-.54-1.3-.74-1.78-.4-.4-.54-.41z"/></svg>
+</a>
+
+
+<div class="cp-lightbox" id="cpLightbox">
+  <button type="button" class="cp-lightbox-close" onclick="cerrarLightbox()" aria-label="Cerrar">
+    <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+  <p class="cp-lightbox-hint">Pellizcá para hacer zoom · doble tap</p>
+  <div class="cp-lightbox-img-wrap" id="cpLightboxImgWrap">
+    <img id="cpLightboxImg" src="" alt="">
+  </div>
+  <p class="cp-lightbox-caption" id="cpLightboxCaption"></p>
+</div>
+
+
+<div class="cp-footer"></div>
+
+<script>
+// ── Parámetros de la URL ──────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+// Link a un producto puntual (ej. compartir "este bajo" en vez del
+// catálogo entero) — ver compartirProducto() y el auto-scroll/zoom
+// más abajo, después de que carguen los productos.
+const paramProducto = params.get('producto') || '';
+
+let cpProductos = [];
+let cpWhatsapp = '';
+// `let`, no `const` — se asigna más abajo dentro del `else`, pero
+// varias funciones definidas afuera de ese bloque (preguntarPorProducto,
+// registrarVisitaCatalogoPublico) necesitan poder usarla después.
+let db = null;
+
+function mostrarError(msg) {
+  document.getElementById('cpSubtitulo').textContent = 'No disponible';
+  document.getElementById('cpContenido').innerHTML = '<p class="cp-error">' + msg + '</p>';
+}
+
+function pintarCatalogo(data) {
+      if (!data || data.activo !== true) {
+        mostrarError('El catálogo no está disponible por ahora.');
+        return;
+      }
+
+      document.getElementById('cpNombre').textContent = data.nombre || 'Catálogo';
+      // El título de la pestaña y las meta tags Open Graph sí se
+      // pueden actualizar acá con JS (a diferencia de lo que ve un
+      // bot de vista previa como el de WhatsApp, ver el comentario
+      // grande en <head> sobre por qué esas SÍ quedan estáticas) —
+      // esto ayuda a quien ya tiene la página abierta y cambia de
+      // pestaña, nada más.
+      if (data.nombre) {
+        document.title = data.nombre + ' · Catálogo';
+        const ogTitle = document.querySelector('meta[property="og:title"]');
+        if (ogTitle) ogTitle.setAttribute('content', data.nombre + ' · Catálogo');
+      }
+
+      const productosObj = data.productos || {};
+      cpProductos = Object.keys(productosObj).map(code => ({
+        code,
+        nombre: productosObj[code].nombre || '',
+        categoria: productosObj[code].categoria || 'Sin categoría',
+        imagen: productosObj[code].imagen || '',
+        actualizadoEn: productosObj[code].actualizadoEn || 0,
+        // Productos que quedaron espejados ANTES de este campo (ver
+        // sincronizarCatalogoPublico() en catalogo-logic.js) no lo tienen
+        // todavía — default true para no marcarlos "agotado" por
+        // error hasta que se vuelvan a sincronizar.
+        disponible: productosObj[code].disponible !== false
+      })).filter(p => p.nombre);
+
+      document.getElementById('cpSubtitulo').textContent =
+        cpProductos.length + ' producto' + (cpProductos.length === 1 ? '' : 's');
+
+      if (data.whatsapp) {
+        cpWhatsapp = data.whatsapp;
+        const waHref = 'https://wa.me/' + data.whatsapp.replace(/\D/g, '') +
+          '?text=' + encodeURIComponent('Hola, vi su catálogo y quería consultar por un producto.');
+        const fab = document.getElementById('cpFabWa');
+        fab.href = waHref;
+        fab.style.display = 'flex';
+      }
+
+      if (cpProductos.length > 6) {
+        document.getElementById('cpSearchInput').style.display = 'block';
+      }
+
+      poblarCategoriasPublico(cpProductos);
+      renderCatalogoPublico(ordenarYFiltrar(cpProductos), cpWhatsapp);
+
+      // Analítica: 1 visita por carga de página exitosa — ver
+      // registrarVisitaCatalogoPublico() más abajo. No cuenta visitas
+      // a un catálogo desactivado ni links rotos (esas ya cortaron
+      // antes, en el if/mostrarError de arriba).
+      registrarVisitaCatalogoPublico();
+
+      // Link a un producto puntual (?producto=P001, ver
+      // compartirProducto() más abajo) — si el producto existe y
+      // tiene foto, abre el visor directo; si no tiene foto, hace
+      // scroll hasta su tarjeta y la resalta un momento.
+      if (paramProducto) {
+        const p = cpProductos.find(x => x.code === paramProducto);
+        if (p) {
+          if (p.imagen) {
+            abrirLightbox(p.imagen, p.nombre);
+          } else {
+            setTimeout(() => {
+              const tarjeta = Array.from(document.querySelectorAll('.cp-item'))
+                .find(el => el.dataset.code === paramProducto);
+              if (tarjeta) {
+                if (typeof tarjeta.scrollIntoView === 'function') {
+                  tarjeta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                tarjeta.classList.add('cp-item-resaltado');
+                setTimeout(() => tarjeta.classList.remove('cp-item-resaltado'), 2200);
+              }
+            }, 100);
+          }
+        }
+      }
+}
+
+// Los clientes leen catalogo.json, una copia estática que publica GitHub Pages: no tocan Firebase,
+// así muchas visitas a la vez no gastan el plan gratuito. Solo si esa copia aún no existe (404)
+// se cae a Firebase, y recién ahí se descarga su SDK.
+const cargarScriptPublico = src => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+async function cargarDesdeFirebase() {
+  const G = 'https://www.gstatic.com/firebasejs/10.13.0/';
+  await cargarScriptPublico(G + 'firebase-app-compat.js'); await cargarScriptPublico(G + 'firebase-database-compat.js');
+  firebase.initializeApp(window.FIREBASE_CONFIG);
+  db = firebase.database();
+  return (await db.ref('catalogoPublico').once('value')).val();
+}
+(async () => {
+  let data;
+  try {
+    const r = await fetch('catalogo.json?v=' + Math.floor(Date.now() / 300000), { cache: 'no-cache' });
+    if (!r.ok) throw new Error('sin copia');
+    data = await r.json();
+  } catch (e) {
+    try { data = await cargarDesdeFirebase(); } catch (e2) { return mostrarError('El catálogo no está disponible por ahora.'); }
+  }
+  try { pintarCatalogo(data); } catch (e) { mostrarError('El catálogo no está disponible por ahora.'); }
+})();
+
+// Cuenta visitas/consultas SIN saber quién es cada visitante — solo
+// dos números que sube el admin (ver "Analítica" en Configuración →
+// Catálogo público). transaction() (no un simple .set()) porque dos
+// visitas casi simultáneas no se pueden leer-y-sumar por separado sin
+// pisarse: Firebase reintenta sola con el valor más nuevo hasta que
+// el incremento entra limpio — así lo exige también la regla
+// ("newData.val() === data.val() + 1", ver database.rules.json).
+function registrarVisitaCatalogoPublico() {}
+
+function registrarConsultaProducto(codigo) {}
+
+let cpCategoriaActiva = 'todas';
+
+function poblarCategoriasPublico(lista) {
+  if (!lista.length) return; // sin productos, ni la barra tiene sentido
+  document.getElementById('cpToolbar').style.display = 'flex';
+
+  // El filtro de categorías puntual solo vale la pena si hay más de
+  // una — con una sola, el chip "Todas" no le sirve a nadie. La
+  // barra en sí (Favoritos + orden) igual se muestra arriba, sin
+  // depender de esto.
+  const categorias = Array.from(new Set(lista.map(p => p.categoria))).sort((a, b) => a.localeCompare(b));
+  if (categorias.length < 2) return;
+
+  const cats = document.getElementById('cpCats');
+  const chip = (valor, etiqueta) =>
+    `<button type="button" class="cp-cat-chip${valor === cpCategoriaActiva ? ' active' : ''}" onclick="elegirCategoriaPublico(${JSON.stringify(valor).replace(/"/g, '&quot;')})">${escapeHtmlPublico(etiqueta)}</button>`;
+  cats.innerHTML = chip('todas', 'Todas') + categorias.map(c => chip(c, c)).join('');
+}
+
+function elegirCategoriaPublico(categoria) {
+  cpCategoriaActiva = categoria;
+  document.querySelectorAll('.cp-cat-chip').forEach(el => {
+    el.classList.toggle('active', el.textContent === (categoria === 'todas' ? 'Todas' : categoria));
+  });
+  filtrarCatalogoPublico();
+}
+
+function ordenarYFiltrar(lista) {
+  const q = (document.getElementById('cpSearchInput').value || '').trim().toLowerCase();
+  const orden = document.getElementById('cpSortSelect') ? document.getElementById('cpSortSelect').value : 'reciente';
+
+  let filtrado = lista;
+  if (cpCategoriaActiva !== 'todas') filtrado = filtrado.filter(p => p.categoria === cpCategoriaActiva);
+  if (cpSoloFavoritos) {
+    const favoritos = leerFavoritosPublico();
+    filtrado = filtrado.filter(p => favoritos.includes(p.code));
+  }
+  if (q) filtrado = filtrado.filter(p => p.nombre.toLowerCase().includes(q));
+
+  filtrado = [...filtrado];
+  if (orden === 'nombre') {
+    filtrado.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  } else {
+    filtrado.sort((a, b) => b.actualizadoEn - a.actualizadoEn);
+  }
+  return filtrado;
+}
+
+function escapeHtmlPublico(str) {
+  return String(str || '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function renderCatalogoPublico(lista, whatsapp) {
+  const el = document.getElementById('cpContenido');
+  if (!lista.length) {
+    el.innerHTML = cpProductos.length
+      ? '<p class="cp-empty">Ningún producto coincide con tu búsqueda.</p>'
+      : '<p class="cp-empty">Todavía no hay productos publicados.</p>';
+    return;
+  }
+  el.innerHTML = '<div class="cp-grid">' + lista.map(p => itemHtmlPublico(p, whatsapp)).join('') + '</div>';
+}
+
+// Arma un argumento seguro para meter dentro de un onclick="..." —
+// JSON.stringify escapa comillas simples, backslashes, etc. como
+// corresponde a un string JS válido; el .replace(/"/g, '&quot;')
+// extra es porque el onclick va entre comillas DOBLES en el HTML, así
+// que las comillas dobles que JSON.stringify usa para envolver el
+// string chocarían con esas si no se escapan a entidad HTML acá.
+function toOnclickArg(str) {
+  return JSON.stringify(str || '').replace(/"/g, '&quot;');
+}
+
+function itemHtmlPublico(p, whatsapp) {
+  const thumb = p.imagen
+    ? `<img src="${p.imagen}" alt="" loading="lazy">`
+    : `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>`;
+
+  // Solo clickeable si hay foto de verdad — el ícono de "sin imagen"
+  // no tiene nada que mostrar en grande.
+  const thumbClick = p.imagen
+    ? ` onclick="abrirLightbox(${toOnclickArg(p.imagen)}, ${toOnclickArg(p.nombre)})" style="cursor:zoom-in"`
+    : '';
+
+  // "disponible" se recalcula solo cada vez que cambia el stock real
+  // (ver sincronizarCatalogoPublico() en catalogo-logic.js) — acá nunca
+  // se oculta el producto agotado, solo se marca: alguien puede
+  // seguir queriendo preguntar cuándo va a haber de nuevo.
+  const badge = p.disponible ? '' : '<span class="cp-agotado-badge">Agotado</span>';
+
+  const esFavorito = esProductoFavorito(p.code);
+  const corazon = `
+    <button type="button" class="cp-fav-btn${esFavorito ? ' activo' : ''}" onclick="toggleFavoritoPublico(event, ${toOnclickArg(p.code)})" aria-label="Marcar como favorito">
+      <svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.8 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+    </button>`;
+
+  const askBtn = whatsapp
+    ? `<button type="button" class="cp-ask" onclick="preguntarPorProducto(${toOnclickArg(p.code)}, ${toOnclickArg(p.nombre)}, ${toOnclickArg(p.imagen)}, ${p.disponible ? 'true' : 'false'})">
+         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.69.44 3.34 1.28 4.79L2 22l5.44-1.43a9.9 9.9 0 0 0 4.6 1.17h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.87 9.87 0 0 0 12.04 2"/></svg>
+         ${p.disponible ? 'Preguntar' : 'Consultar'}
+       </button>`
+    : '';
+
+  const compartirBtn = `
+    <button type="button" class="cp-share-btn" onclick="compartirProducto(${toOnclickArg(p.code)}, ${toOnclickArg(p.nombre)})" aria-label="Compartir este producto">
+      <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.5" x2="15.4" y2="6.5"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/></svg>
+    </button>`;
+
+  return `
+    <div class="cp-item${p.disponible ? '' : ' agotado'}" data-nombre="${escapeHtmlPublico(p.nombre.toLowerCase())}" data-code="${escapeHtmlPublico(p.code)}">
+      <div class="cp-thumb"${thumbClick}>${thumb}${badge}${corazon}</div>
+      <div class="cp-body">
+        <div class="cp-cat-row">
+          <span class="cp-cat">${escapeHtmlPublico(p.categoria)}</span>
+          ${compartirBtn}
+        </div>
+        <span class="cp-name">${escapeHtmlPublico(p.nombre)}</span>
+        ${askBtn}
+      </div>
+    </div>`;
+}
+
+function filtrarCatalogoPublico() {
+  renderCatalogoPublico(ordenarYFiltrar(cpProductos), cpWhatsapp);
+}
+
+// ── Favoritos (localStorage, sin cuenta ni login) ────────────────
+// Guardados en este navegador, sin cuenta.
+function claveFavoritosPublico() {
+  return 'balanceinv_catalogo_favoritos';
+}
+
+function leerFavoritosPublico() {
+  try {
+    const raw = localStorage.getItem(claveFavoritosPublico());
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return []; // localStorage bloqueado (modo incógnito estricto, etc.) — sin favoritos, no rompe nada
+  }
+}
+
+function esProductoFavorito(codigo) {
+  return leerFavoritosPublico().includes(codigo);
+}
+
+function toggleFavoritoPublico(event, codigo) {
+  event.stopPropagation(); // no abrir el visor de zoom al tocar el corazón — están superpuestos en la esquina
+  const actuales = leerFavoritosPublico();
+  const idx = actuales.indexOf(codigo);
+  if (idx === -1) actuales.push(codigo); else actuales.splice(idx, 1);
+  try { localStorage.setItem(claveFavoritosPublico(), JSON.stringify(actuales)); } catch (e) { /* sin guardar, no rompe nada */ }
+
+  const btn = event.currentTarget;
+  btn.classList.toggle('activo', idx === -1);
+
+  // Si el filtro "Solo favoritos" está activo y se acaba de sacar un
+  // favorito, esa tarjeta tiene que desaparecer de la vista ya mismo.
+  if (cpSoloFavoritos) filtrarCatalogoPublico();
+}
+
+let cpSoloFavoritos = false;
+
+function toggleSoloFavoritosPublico(btn) {
+  cpSoloFavoritos = !cpSoloFavoritos;
+  btn.classList.toggle('active', cpSoloFavoritos);
+  filtrarCatalogoPublico();
+}
+
+// ── Compartir un producto puntual ────────────────────────────────
+// Arma el mismo link del catálogo pero con &producto=CODIGO — al
+// abrirlo, la página lo detecta (ver el bloque grande más arriba,
+// después de renderCatalogoPublico) y muestra ese producto directo
+// (zoom si tiene foto, scroll+resaltado si no).
+function compartirProducto(codigo, nombre) {
+  const url = new URL(location.href);
+  url.searchParams.set('producto', codigo);
+  const link = url.toString();
+
+  if (navigator.share) {
+    navigator.share({ title: nombre, url: link }).catch(() => {}); // cancelar el selector no es un error
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(link).then(() => alert('Link copiado.')).catch(() => alert(link));
+  } else {
+    alert(link); // último recurso: mostrarlo para que lo copien a mano
+  }
+}
+
+// ── "Preguntar" por un producto puntual ─────────────────────────
+// WhatsApp NO tiene ninguna forma de recibir una imagen adjunta a
+// través de un link wa.me — esa API solo acepta texto (?text=...).
+// Adjuntar la foto de VERDAD solo es posible pasando por el selector
+// nativo de "Compartir" del celular (Web Share API con archivos),
+// que sí puede mandar una imagen real a WhatsApp — a costa de
+// mostrarle a la persona el selector de apps en vez de abrir
+// WhatsApp directo. Si el navegador no lo soporta (la mayoría de
+// desktop, algunos Android viejos) o algo falla en el camino (CORS,
+// la persona cancela el selector), cae al link de texto de siempre,
+// con la url de la foto incluida como parte del mensaje — así, aunque
+// no sea un adjunto real, quien lo reciba puede tocarla y verla.
+async function preguntarPorProducto(codigo, nombre, imagenUrl, disponible) {
+  registrarConsultaProducto(codigo);
+
+  const mensaje = disponible
+    ? 'Hola, quería consultar por: ' + nombre
+    : 'Hola, vi que "' + nombre + '" está agotado — ¿saben cuándo van a tener más?';
+
+  if (imagenUrl && navigator.share && navigator.canShare) {
+    try {
+      const resp = await fetch(imagenUrl);
+      const blob = await resp.blob();
+      const archivo = new File([blob], 'producto.jpg', { type: blob.type || 'image/jpeg' });
+      if (navigator.canShare({ files: [archivo] })) {
+        await navigator.share({ files: [archivo], text: mensaje });
+        return;
+      }
+    } catch (e) {
+      // Sigue con el link de texto de abajo — cancelar el selector
+      // también entra por acá (no es un error real), así que no hace
+      // falta avisarle nada a la persona.
+    }
+  }
+
+  const textoConFoto = mensaje + (imagenUrl ? '\n' + imagenUrl : '');
+  window.open('https://wa.me/' + cpWhatsapp.replace(/\D/g, '') + '?text=' + encodeURIComponent(textoConFoto), '_blank');
+}
+
+// ── Visor con zoom — pellizcar (mobile), rueda (desktop), doble
+// tap/clic, y arrastrar para mover cuando está ampliada. Todo con
+// Pointer Events (funciona igual para mouse y touch, y soporta
+// varios dedos a la vez sin código separado para cada caso) — ver
+// touch-action:none en el CSS de la imagen, que le pide al navegador
+// que no compita con estos handlers usando SU propio pan/zoom nativo.
+(function () {
+  const lightbox = document.getElementById('cpLightbox');
+  const wrap = document.getElementById('cpLightboxImgWrap');
+  const img = document.getElementById('cpLightboxImg');
+  const caption = document.getElementById('cpLightboxCaption');
+
+  const MIN_SCALE = 1;
+  const MAX_SCALE = 4;
+  let scale = 1, tx = 0, ty = 0;
+  const pointers = new Map(); // pointerId -> {x, y} — uno por dedo activo
+  let pinchStartDist = 0, pinchStartScale = 1;
+  let panStart = null; // {x, y, tx, ty} del único dedo/mouse activo
+  let lastTapTime = 0, lastTapX = 0, lastTapY = 0;
+
+  function aplicarTransform() {
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }
+
+  function resetZoom() {
+    scale = 1; tx = 0; ty = 0;
+    aplicarTransform();
+  }
+
+  // Simple a propósito: no recalcula el punto exacto del pellizco al
+  // reescalar, solo limita cuánto se puede arrastrar según el zoom
+  // actual — así la imagen nunca "se pierde" fuera de la pantalla,
+  // sin necesitar la matemática más fina de un editor de fotos.
+  function limitarArrastre() {
+    const rect = wrap.getBoundingClientRect();
+    const maxX = (rect.width * (scale - 1)) / 2 + rect.width * 0.15;
+    const maxY = (rect.height * (scale - 1)) / 2 + rect.height * 0.15;
+    tx = Math.min(maxX, Math.max(-maxX, tx));
+    ty = Math.min(maxY, Math.max(-maxY, ty));
+  }
+
+  function distancia(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  window.abrirLightbox = function (url, nombre) {
+    img.src = url;
+    caption.textContent = nombre || '';
+    resetZoom();
+    lightbox.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  };
+
+  window.cerrarLightbox = function () {
+    lightbox.classList.remove('open');
+    document.body.style.overflow = '';
+    pointers.clear();
+    panStart = null;
+    pinchStartDist = 0;
+    img.src = '';
+  };
+
+  // Tocar el fondo oscuro (no la imagen) cierra el visor.
+  lightbox.addEventListener('click', e => {
+    if (e.target === lightbox) cerrarLightbox();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && lightbox.classList.contains('open')) cerrarLightbox();
+  });
+
+  img.addEventListener('pointerdown', e => {
+    img.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 1) {
+      panStart = { x: e.clientX, y: e.clientY, tx, ty };
+
+      // Doble tap / doble clic (dos toques en menos de 300ms, cerca
+      // uno del otro): alterna entre 1x y 2.5x.
+      const ahora = Date.now();
+      const cercaDelAnterior = distancia({ x: e.clientX, y: e.clientY }, { x: lastTapX, y: lastTapY }) < 30;
+      if (ahora - lastTapTime < 300 && cercaDelAnterior) {
+        scale = scale > 1 ? 1 : 2.5;
+        if (scale === 1) { tx = 0; ty = 0; }
+        aplicarTransform();
+        panStart = null;
+      }
+      lastTapTime = ahora;
+      lastTapX = e.clientX;
+      lastTapY = e.clientY;
+    } else if (pointers.size === 2) {
+      const pts = Array.from(pointers.values());
+      pinchStartDist = distancia(pts[0], pts[1]);
+      pinchStartScale = scale;
+      panStart = null; // dos dedos: pellizcar, no arrastrar
+    }
+  });
+
+  img.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 2 && pinchStartDist > 0) {
+      const pts = Array.from(pointers.values());
+      const dist = distancia(pts[0], pts[1]);
+      scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinchStartScale * (dist / pinchStartDist)));
+      limitarArrastre();
+      aplicarTransform();
+    } else if (pointers.size === 1 && panStart && scale > 1) {
+      tx = panStart.tx + (e.clientX - panStart.x);
+      ty = panStart.ty + (e.clientY - panStart.y);
+      limitarArrastre();
+      aplicarTransform();
+    }
+  });
+
+  function soltarDedo(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchStartDist = 0;
+    if (pointers.size === 0) panStart = null;
+    // Redondeo: si quedó apenas por debajo de 1x, que vuelva prolijo.
+    if (scale < MIN_SCALE + 0.01) resetZoom();
+  }
+  img.addEventListener('pointerup', soltarDedo);
+  img.addEventListener('pointercancel', soltarDedo);
+
+  // Rueda del mouse (desktop) — zoom simple centrado en la imagen,
+  // sin perseguir la posición exacta del cursor a propósito (mismo
+  // criterio de "simple y confiable" que limitarArrastre() de arriba).
+  wrap.addEventListener('wheel', e => {
+    if (!lightbox.classList.contains('open')) return;
+    e.preventDefault();
+    scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale + (e.deltaY < 0 ? 0.3 : -0.3)));
+    limitarArrastre();
+    aplicarTransform();
+  }, { passive: false });
+})();
+</script>
+</body>
+</html>
