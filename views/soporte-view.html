@@ -1,0 +1,184 @@
+<style>
+  .sop-grid {
+    display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .sop-grid { grid-template-columns: 1fr; } }
+
+  .sop-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+    padding: 18px 20px 20px; margin-bottom: 16px;
+  }
+  .sop-card:last-child { margin-bottom: 0; }
+  .sop-card-title { font-size: 14.5px; font-weight: 700; color: var(--text-1); margin: 0 0 3px; }
+  .sop-card-sub { font-size: 12px; color: var(--text-3); margin: 0 0 14px; }
+
+  /* ── FAQ (acordeón nativo con <details>) ── */
+  .sop-faq-item {
+    border-bottom: 1px solid var(--border);
+  }
+  .sop-faq-item:last-child { border-bottom: none; }
+  .sop-faq-item summary {
+    list-style: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 12px 2px; font-size: 13.5px; font-weight: 600; color: var(--text-1);
+  }
+  .sop-faq-item summary::-webkit-details-marker { display: none; }
+  .sop-faq-item summary::after {
+    content: '+'; flex-shrink: 0; color: var(--text-3); font-size: 16px; font-weight: 400;
+    transition: transform var(--t);
+  }
+  .sop-faq-item[open] summary::after { transform: rotate(45deg); }
+  .sop-faq-item p {
+    font-size: 12.5px; color: var(--text-2); line-height: 1.55;
+    padding: 0 2px 14px;
+  }
+
+  /* ── Lista de reportes (propios o del equipo) ── */
+  .sop-ticket {
+    padding: 12px 2px; border-bottom: 1px solid var(--border);
+  }
+  .sop-ticket:last-child { border-bottom: none; }
+  .sop-ticket-top {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .sop-ticket-asunto { font-size: 13px; font-weight: 600; color: var(--text-1); }
+  .sop-ticket-meta { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+  .sop-ticket-msg { font-size: 12.5px; color: var(--text-2); margin-top: 6px; line-height: 1.5; }
+  .sop-ticket-reply {
+    margin-top: 8px; padding: 8px 10px; border-radius: var(--r-sm);
+    background: var(--accent-soft); font-size: 12px; color: var(--text-1); line-height: 1.5;
+  }
+  .sop-ticket-reply b { color: var(--accent); }
+
+  .sop-badge {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 700; flex-shrink: 0;
+  }
+  .sop-badge.abierto  { background: var(--copper-bg); color: var(--copper); }
+  .sop-badge.resuelto { background: var(--green-bg);  color: var(--green); }
+
+  .sop-tipo-tag {
+    font-size: 10.5px; font-weight: 600; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  .sop-reply-form { display: flex; gap: 6px; margin-top: 8px; }
+  .sop-reply-form input {
+    flex: 1; font-family: var(--font-ui); font-size: 12.5px;
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface-2); color: var(--text-1);
+  }
+
+  .sop-feedback {
+    margin-top: 12px; padding: 9px 13px; border-radius: var(--r-sm);
+    font-size: 12.5px; display: none;
+  }
+  .sop-feedback.ok  { display: block; background: var(--green-bg); color: var(--green); }
+  .sop-feedback.err { display: block; background: var(--red-bg);   color: var(--red); }
+</style>
+
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-title">
+      <h1>Soporte</h1>
+      <p>Preguntas frecuentes y reportes al administrador</p>
+    </div>
+  </div>
+
+  <div class="page-content">
+    <div class="sop-grid">
+
+      <!-- ── Columna izquierda: preguntas frecuentes ── -->
+      <div>
+        <div class="sop-card">
+          <h2 class="sop-card-title">Preguntas frecuentes</h2>
+          <p class="sop-card-sub">Lo más consultado sobre el uso del sistema.</p>
+
+          <details class="sop-faq-item">
+            <summary>¿Cómo agrego un producto nuevo?</summary>
+            <p>Ve a <b>Stock</b> y toca <b>“Agregar producto”</b>, arriba a la derecha. Completa código, nombre, precio y el stock inicial por almacén.</p>
+          </details>
+          <details class="sop-faq-item">
+            <summary>¿Cómo registro una venta?</summary>
+            <p>Ve a <b>Notas de Pedido</b> y toca <b>“Nueva nota”</b>. Agrega los productos, el cliente y confirma — el stock se descuenta solo.</p>
+          </details>
+          <details class="sop-faq-item">
+            <summary>¿Qué significa que un producto se vea en rojo en Stock?</summary>
+            <p>Que su cantidad está en <b>stock bajo</b> (5 unidades o menos). También aparece listado en el Dashboard, en el panel “Stock bajo”.</p>
+          </details>
+          <details class="sop-faq-item">
+            <summary>¿Cómo veo el stock de un almacén específico?</summary>
+            <p>En <b>Stock</b>, usa las pestañas de arriba: “Todos los almacenes”, Almacén 1, Almacén 2 o Almacén 3.</p>
+          </details>
+          <details class="sop-faq-item">
+            <summary>Olvidé mi contraseña, ¿qué hago?</summary>
+            <p>Si ya tienes sesión iniciada en otro dispositivo, cámbiala desde <b>Mi perfil → Seguridad</b>. Si no puedes entrar, pide al administrador que la reinicie desde <b>Registros</b>.</p>
+          </details>
+          <details class="sop-faq-item">
+            <summary>¿Cómo activo el modo oscuro?</summary>
+            <p>Ve a <b>Configuración → Apariencia</b> y elige “Oscuro”. Se guarda solo en este dispositivo.</p>
+          </details>
+          <details class="sop-faq-item dash-admin-only">
+            <summary>¿Cómo creo una cuenta para un vendedor nuevo?</summary>
+            <p>Ve a <b>Registros → Nueva cuenta</b>. Solo el administrador puede crear, activar/desactivar o eliminar cuentas.</p>
+          </details>
+          <details class="sop-faq-item dash-admin-only">
+            <summary>¿Qué hace “Reiniciar datos de la maqueta”?</summary>
+            <p>Está en <b>Configuración → Administración</b>. Borra productos, clientes, notas y cuentas de vendedores de este navegador, y vuelve a crear los datos de ejemplo desde cero. No se puede deshacer.</p>
+          </details>
+        </div>
+      </div>
+
+      <!-- ── Columna derecha: reportar + mis reportes ── -->
+      <div>
+        <div class="sop-card">
+          <h2 class="sop-card-title">Reportar un problema o sugerencia</h2>
+          <p class="sop-card-sub">Le llega directo al administrador.</p>
+
+          <div class="form-group">
+            <label class="form-label">Tipo</label>
+            <select class="form-select" id="sopTipo">
+              <option value="error">Error / algo no funciona</option>
+              <option value="sugerencia">Sugerencia</option>
+              <option value="consulta">Consulta</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Asunto</label>
+            <input class="form-input" id="sopAsunto" type="text" placeholder="Resumen corto">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mensaje</label>
+            <textarea class="form-input" id="sopMensaje" rows="4" placeholder="Cuéntanos con detalle qué pasó o qué necesitas…" style="resize:vertical;min-height:88px"></textarea>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end">
+            <button class="btn btn-primary" id="btnEnviarReporte" onclick="enviarReporteSoporte()">Enviar</button>
+          </div>
+          <div class="sop-feedback" id="sopFormFeedback"></div>
+        </div>
+
+        <div class="sop-card">
+          <h2 class="sop-card-title">Mis reportes</h2>
+          <p class="sop-card-sub">Lo que has enviado y su estado.</p>
+          <div id="sopMisReportes">
+            <p class="dash-empty">Cargando…</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Solo admin: todos los reportes del equipo ── -->
+    <div class="sop-card dash-admin-only" style="margin-top:16px">
+      <h2 class="sop-card-title">Reportes del equipo</h2>
+      <p class="sop-card-sub">Reportes recientes de todas las cuentas.</p>
+      <div id="sopTodosReportes">
+        <p class="dash-empty">Cargando…</p>
+      </div>
+    </div>
+
+  </div>
+</main>

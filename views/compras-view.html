@@ -1,0 +1,46 @@
+<main class="main">
+  <div class="topbar"><div class="topbar-title"><h1>Compras y proveedores</h1><p>Registra lo que entra a tu stock</p></div></div>
+  <div class="page-content">
+    <div class="bal-card">
+      <h3>Registrar compra</h3>
+      <div class="bal-import">
+        <button type="button" class="btn" id="cpLeer">📄 Leer comprobante (XML, PDF o foto)</button>
+        <input type="file" id="cpArchivo" accept=".xml,.pdf,application/pdf,text/xml,image/*" hidden>
+        <span id="cpLeerEstado" class="bal-hint"></span>
+        <p class="bal-hint">Sube el XML, PDF o foto y revisa antes de guardar.</p>
+      </div>
+      <div class="bal-form">
+        <label class="bal-field"><span>Fecha</span><input id="cpDate" type="date"></label>
+        <label class="bal-field"><span>Almacén donde se añade</span>
+          <select id="cpAlm"><option value="alm1">Almacén 1</option><option value="alm2">Almacén 2</option><option value="alm3">Almacén 3</option></select></label>
+        <label class="bal-field"><span>Proveedor</span><input id="cpProv" placeholder="Nombre del proveedor" list="cpProvList"><datalist id="cpProvList"></datalist></label>
+        <label class="bal-field"><span>RUC del proveedor <a href="#" id="cpRucBuscar" style="font-weight:500;font-size:12px;margin-left:6px">Buscar nombre</a></span><input id="cpRuc" inputmode="numeric" maxlength="11" placeholder="11 dígitos (obligatorio en factura)"></label>
+        <label class="bal-field"><span>Comprobante</span>
+          <select id="cpCompTipo"><option value="">Sin comprobante (nacional, solo entregan el producto)</option><option>Factura</option><option>Boleta</option></select></label>
+        <label class="bal-field cp-comp"><span>Serie</span><input id="cpSerie" placeholder="Ej. F001"></label>
+        <label class="bal-field cp-comp"><span>Número</span><input id="cpNumero" placeholder="Ej. 000123"></label>
+        <label class="bal-field"><span>Forma de pago</span>
+          <select id="cpPago"><option>Efectivo</option><option>Yape</option><option>POS</option><option>Transferencia</option><option>Tarjeta</option><option>Crédito</option><option>Otro</option></select></label>
+        <label class="bal-field"><span>N° operación / referencia</span><input id="cpOp" placeholder="Opcional"></label>
+        <label class="bal-field"><span>Estado del pago</span>
+          <select id="cpEstado"><option>Pagado</option><option>Pendiente</option></select></label>
+        <label class="bal-field bal-wide"><span>Observaciones (opcional)</span><input id="cpObs" placeholder="Notas de la compra"></label>
+      </div>
+    </div>
+    <div class="bal-card">
+      <h3>Productos comprados</h3>
+      <p class="bal-hint">Costo por unidad, con IGV incluido. Precios de venta: en Stock.</p>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Producto</th><th>Cantidad</th><th>Costo unit. con IGV</th><th>Total</th><th></th></tr></thead><tbody id="cpLineas"></tbody></table></div>
+      <button type="button" class="btn" id="cpAddLinea">+ Agregar otro producto</button>
+      <p id="cpTotales" class="bal-hint"></p>
+      <p id="cpAviso" class="bal-hint"></p>
+      <div id="cpMsg" role="status" style="display:none"></div>
+      <button class="btn btn-primary" id="cpSave">Registrar compra</button>
+      <button class="btn" id="cpReset" type="button">Limpiar formulario</button>
+    </div>
+    <div class="bal-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3>Últimas compras</h3><button class="btn" id="cpLimpiar" style="display:none">Limpiar anuladas</button></div>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Fecha</th><th>Código</th><th>Producto</th><th>Proveedor</th><th>Cant.</th><th>Costo unit.</th><th>Total</th><th>Comprobante</th><th>Saldo doc.</th><th></th></tr></thead><tbody id="cpRows"></tbody></table></div>
+    </div>
+  </div>
+</main>

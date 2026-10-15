@@ -1,0 +1,154 @@
+<style>
+  .perfil-header {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+    padding: 20px 22px; margin-bottom: 18px;
+  }
+  .perfil-avatar {
+    width: 62px; height: 62px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-weight: 700; font-size: 20px;
+    color: #fff; background: var(--ink);
+  }
+  .perfil-header-info { min-width: 0; }
+  .perfil-header-name {
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+    font-size: 18px; font-weight: 700; color: var(--text-1); letter-spacing: -0.01em;
+  }
+  .perfil-header-meta {
+    margin-top: 4px; font-size: 12.5px; color: var(--text-3);
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .perfil-header-meta .mono { font-family: var(--font-mono); }
+
+  .perfil-grid {
+    display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .perfil-grid { grid-template-columns: 1fr; } }
+
+  .perfil-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+    padding: 18px 20px 20px; margin-bottom: 16px;
+  }
+  .perfil-card:last-child { margin-bottom: 0; }
+  .perfil-card-title { font-size: 14.5px; font-weight: 700; color: var(--text-1); margin: 0 0 3px; }
+  .perfil-card-sub { font-size: 12px; color: var(--text-3); margin: 0 0 16px; }
+
+  .perfil-readonly-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .perfil-readonly-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .perfil-readonly-row .label { color: var(--text-3); font-size: 12px; font-weight: 600; }
+  .perfil-readonly-row .val { color: var(--text-1); font-weight: 600; font-family: var(--font-mono); font-size: 12.5px; }
+
+  .perfil-feedback {
+    margin-top: 12px; padding: 9px 13px; border-radius: var(--r-sm);
+    font-size: 12.5px; display: none;
+  }
+  .perfil-feedback.ok   { display: block; background: var(--green-bg); color: var(--green); }
+  .perfil-feedback.err  { display: block; background: var(--red-bg);   color: var(--red); }
+
+  .perfil-danger-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding-top: 4px;
+  }
+  .perfil-danger-row p { margin: 0; font-size: 12.5px; color: var(--text-3); max-width: 320px; }
+</style>
+
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-title">
+      <h1>Mi perfil</h1>
+      <p>Tu cuenta, tus datos de contacto y tu contraseña</p>
+    </div>
+  </div>
+
+  <div class="page-content">
+
+    <div class="perfil-header">
+      <div class="perfil-avatar" id="perfilAvatar">—</div>
+      <div class="perfil-header-info">
+        <div class="perfil-header-name">
+          <span id="perfilHeaderNombre">Cargando…</span>
+          <span class="reg-role-badge" id="perfilHeaderBadge"></span>
+        </div>
+        <div class="perfil-header-meta">
+          <span id="perfilHeaderContacto">—</span>
+          <span>·</span>
+          <span>Miembro desde <span id="perfilHeaderDesde">—</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="perfil-grid">
+
+      <!-- ── Columna izquierda: datos de la cuenta ── -->
+      <div>
+        <div class="perfil-card">
+          <h2 class="perfil-card-title">Información de la cuenta</h2>
+          <p class="perfil-card-sub">Visible para tu equipo.</p>
+
+          <div class="form-group">
+            <label class="form-label">Nombre completo</label>
+            <input class="form-input" id="perfilNombre" type="text" placeholder="Tu nombre">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Correo de contacto <span style="color:var(--text-3);font-weight:400;text-transform:none">(opcional)</span></label>
+            <input class="form-input" id="perfilCorreo" type="email" placeholder="tu@correo.com">
+          </div>
+
+          <div class="perfil-readonly-row">
+            <span class="label">Usuario / correo de acceso</span>
+            <span class="val" id="perfilAccesoVal">—</span>
+          </div>
+          <div class="perfil-readonly-row">
+            <span class="label">Rol</span>
+            <span class="val" id="perfilRolVal">—</span>
+          </div>
+
+          <div style="margin-top:16px;display:flex;justify-content:flex-end">
+            <button class="btn btn-primary" id="btnGuardarPerfil" onclick="guardarPerfil()">Guardar cambios</button>
+          </div>
+          <div class="perfil-feedback" id="perfilInfoFeedback"></div>
+        </div>
+      </div>
+
+      <!-- ── Columna derecha: seguridad y sesión ── -->
+      <div>
+        <div class="perfil-card">
+          <h2 class="perfil-card-title">Seguridad</h2>
+          <p class="perfil-card-sub">Cambia tu contraseña de acceso a la app.</p>
+
+          <div class="form-group">
+            <label class="form-label">Nueva contraseña</label>
+            <input class="form-input" id="perfilPass1" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirmar contraseña</label>
+            <input class="form-input" id="perfilPass2" type="password" placeholder="Repite la contraseña" autocomplete="new-password">
+          </div>
+
+          <div style="display:flex;justify-content:flex-end">
+            <button class="btn btn-ghost" id="btnCambiarPass" onclick="cambiarPasswordPerfil()">Actualizar contraseña</button>
+          </div>
+          <div class="perfil-feedback" id="perfilPassFeedback"></div>
+        </div>
+
+        <div class="perfil-card">
+          <h2 class="perfil-card-title">Sesión</h2>
+          <p class="perfil-card-sub">Este dispositivo — <span id="perfilDispositivo">navegador</span></p>
+          <div class="perfil-danger-row">
+            <p>Cierra tu sesión en este dispositivo.</p>
+            <button class="btn btn-ghost" style="color:var(--red);border-color:#FECACA" onclick="logout()">Cerrar sesión</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>

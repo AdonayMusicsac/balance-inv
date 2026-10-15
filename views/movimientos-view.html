@@ -1,0 +1,51 @@
+<main class="main">
+  <div class="topbar"><div class="topbar-title"><h1>Balance y alertas</h1><p>Qué puedes facturar y qué revisar</p></div></div>
+  <div class="page-content">
+    <div class="bal-card"><h3>Alertas <span id="mvAlertCount"></span></h3><div id="mvAlerts"></div></div>
+    <div class="bal-card">
+      <h3>Importados: ¿cuánto puedo facturar?</h3>
+      <div id="fbResumen" class="bal-resumen"></div>
+      <p class="bal-note">Se puede facturar = con documento y en stock. «Usado con otros productos» son unidades que se facturaron a nombre de este importado pero se entregó un nacional. Los montos usan el precio de venta.</p>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Producto</th><th>Stock</th><th>Docs. disponibles</th><th>Usado con otros productos</th><th>Se puede facturar</th><th>Monto</th><th>Sin documento</th><th>Monto sin doc.</th><th>Costo prom.</th><th>Margen</th><th>Decisión</th></tr></thead><tbody id="fbRows"></tbody></table></div>
+      <p id="fbTotal" class="bal-total"></p>
+    </div>
+    <div class="bal-card" id="crCard">
+      <h3>Nacionales facturados con nombre de importado</h3>
+      <p class="bal-note">Aquí ves lo que realmente se entregó (nacional) frente al producto importado con el que salió el comprobante. Así no se confunde el stock con la documentación.</p>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Se entregó (nacional)</th><th>Comprobante a nombre de (importado)</th><th>Unidades</th><th>Monto facturado</th></tr></thead><tbody id="crRows"></tbody></table></div>
+      <p id="crTotal" class="bal-total"></p>
+    </div>
+    <div class="bal-card" id="cfCard">
+      <h3>Conteo físico masivo</h3>
+      <div class="bal-bar"><button class="btn" id="cfCargar">Cargar productos</button><input id="cfNota" placeholder="Nota del conteo (opcional)"><button class="btn btn-primary" id="cfAplicar">Aplicar conteo</button></div>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Producto</th><th>Sistema</th><th>Contado</th></tr></thead><tbody id="cfRows"></tbody></table></div>
+    </div>
+    <div class="bal-card" id="rpCard">
+      <h3>Reportes de gestión</h3>
+      <div class="bal-lists">
+        <div><strong>Dinero parado (90 días sin movimiento)</strong><ul id="rpParados"></ul></div>
+        <div><strong>Más vendidos (30 días)</strong><ul id="rpTop"></ul></div>
+        <div><strong>Compras por proveedor</strong><ul id="rpProv"></ul></div>
+      </div>
+    </div>
+    <div class="bal-card">
+      <h3>Ajuste de inventario</h3>
+      <div class="bal-form">
+        <select id="mvProd" class="bal-wide"></select>
+        <input id="mvContado" type="number" min="0" inputmode="numeric" placeholder="Cantidad contada">
+        <select id="mvMotivo"><option>Conteo físico</option><option>Merma</option><option>Robo o pérdida</option><option>Rotura</option><option>Error de registro</option><option>Otro</option></select>
+        <input id="mvNota" class="bal-wide" placeholder="Nota (obligatoria si es Otro)">
+      </div>
+      <button class="btn btn-primary" id="mvAjustar">Aplicar ajuste</button>
+    </div>
+    <div class="bal-card">
+      <h3>Kardex por producto</h3>
+      <div class="bal-bar"><select id="kxProd"></select><button class="btn" id="kxVer">Ver kardex</button><button class="btn" id="kxXls">Exportar Excel</button></div>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Fecha y hora</th><th>Tipo</th><th>Detalle</th><th>Entrada</th><th>Salida</th><th>Saldo</th></tr></thead><tbody id="kxRows"></tbody></table></div>
+    </div>
+    <div class="bal-card">
+      <h3>Últimos movimientos</h3>
+      <div class="bal-scroll"><table class="bal-table"><thead><tr><th>Fecha y hora</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Saldo</th><th>Usuario</th></tr></thead><tbody id="mvRows"></tbody></table></div>
+    </div>
+  </div>
+</main>

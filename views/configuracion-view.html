@@ -1,0 +1,183 @@
+<style>
+  .cfg-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .cfg-grid { grid-template-columns: 1fr; } }
+
+  .cfg-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+    padding: 18px 20px 20px; margin-bottom: 16px;
+  }
+  .cfg-card:last-child { margin-bottom: 0; }
+  .cfg-card-title { font-size: 14.5px; font-weight: 700; color: var(--text-1); margin: 0 0 3px; }
+  .cfg-card-sub { font-size: 12px; color: var(--text-3); margin: 0 0 16px; }
+
+  .cfg-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .cfg-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .cfg-row:first-child { padding-top: 0; }
+  .cfg-row-label { font-size: 13px; font-weight: 600; color: var(--text-1); }
+  .cfg-row-desc  { font-size: 12px; color: var(--text-3); margin-top: 2px; max-width: 340px; }
+
+  .cfg-pill-group {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 999px;
+    padding: 3px; background: var(--surface-2); flex-shrink: 0;
+  }
+  .cfg-pill {
+    border: none; background: none; cursor: pointer; font-family: var(--font-ui);
+    font-size: 12px; font-weight: 600; color: var(--text-3);
+    padding: 6px 13px; border-radius: 999px; transition: background var(--t), color var(--t);
+  }
+  .cfg-pill.active { background: var(--ink); color: #fff; }
+
+  .cfg-select-inline {
+    width: auto; min-width: 190px; flex-shrink: 0;
+  }
+
+  .cfg-info-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0; font-size: 12.5px;
+  }
+  .cfg-info-row .label { color: var(--text-3); }
+  .cfg-info-row .val { color: var(--text-1); font-weight: 600; font-family: var(--font-mono); font-size: 12px; }
+
+  .cfg-badge-demo {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--copper-bg); color: var(--copper);
+  }
+
+  .cfg-feedback {
+    margin-top: 12px; padding: 9px 13px; border-radius: var(--r-sm);
+    font-size: 12.5px; display: none;
+  }
+  .cfg-feedback.ok  { display: block; background: var(--green-bg); color: var(--green); }
+  .cfg-feedback.err { display: block; background: var(--red-bg);   color: var(--red); }
+</style>
+
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-title">
+      <h1>Configuración</h1>
+      <p>Preferencias de la app en este dispositivo</p>
+    </div>
+  </div>
+
+  <div class="page-content">
+    <div class="cfg-grid">
+
+      <!-- ── Columna izquierda ── -->
+      <div>
+        <div class="cfg-card">
+          <h2 class="cfg-card-title">Apariencia</h2>
+          <p class="cfg-card-sub">Solo afecta a este dispositivo.</p>
+
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Tema</div>
+              <div class="cfg-row-desc">Tema de la pantalla.</div>
+            </div>
+            <div class="cfg-pill-group" id="temaPillGroup">
+              <button type="button" class="cfg-pill" data-tema="claro" onclick="setTema('claro')">Claro</button>
+              <button type="button" class="cfg-pill" data-tema="oscuro" onclick="setTema('oscuro')">Oscuro</button>
+            </div>
+          </div>
+
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Densidad de listas</div>
+              <div class="cfg-row-desc">Compacta muestra más filas.</div>
+            </div>
+            <div class="cfg-pill-group" id="densityPillGroup">
+              <button type="button" class="cfg-pill" data-density="comoda" onclick="setDensidad('comoda')">Cómoda</button>
+              <button type="button" class="cfg-pill" data-density="compacta" onclick="setDensidad('compacta')">Compacta</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="cfg-card">
+          <h2 class="cfg-card-title">Navegación</h2>
+          <p class="cfg-card-sub">Qué sección se abre primero al iniciar sesión.</p>
+
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Página de inicio</div>
+              <div class="cfg-row-desc">Aplica al próximo inicio de sesión.</div>
+            </div>
+            <select class="form-select cfg-select-inline" id="cfgHomePage" onchange="setPaginaInicio(this.value)">
+              <option value="dashboard">Dashboard</option>
+              <option value="stock">Stock</option>
+              <option value="pedidos">Notas de Pedido</option>
+              <option value="historial">Historial</option>
+            </select>
+          </div>
+          <div class="cfg-feedback ok" id="cfgNavFeedback" style="display:none">Guardado — se aplica en tu próximo inicio de sesión.</div>
+        </div>
+
+        <div class="cfg-card nav-admin-only" id="cfgAdminCard">
+          <h2 class="cfg-card-title">Administración</h2>
+          <p class="cfg-card-sub">Solo visible para administradores.</p>
+
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Cuentas del equipo</div>
+              <div class="cfg-row-desc">Accesos de vendedores.</div>
+            </div>
+            <a class="btn btn-ghost" href="#registros">Ir a Registros</a>
+          </div>
+
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Reiniciar datos de la maqueta <span class="cfg-badge-demo">Demo</span></div>
+              <div class="cfg-row-desc">Borra los datos de este navegador y restaura los de ejemplo.</div>
+            </div>
+            <button class="btn btn-ghost" style="color:var(--red);border-color:#FECACA" onclick="reiniciarDatosMaqueta()">Reiniciar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Columna derecha ── -->
+      <div>
+        <div class="cfg-card">
+          <h2 class="cfg-card-title">Catálogo público</h2>
+          <p class="cfg-card-sub">Link y QR del catálogo.</p>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Link del catálogo</div>
+              <div class="cfg-row-desc" id="cfgCatLink" style="word-break:break-all">Cargando…</div>
+            </div>
+            <button type="button" class="btn btn-ghost" id="cfgCatCopiar">Copiar link</button>
+          </div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-row-label">Código QR</div>
+              <div class="cfg-row-desc">Para mostrarlo en tienda o enviarlo por WhatsApp.</div>
+            </div>
+            <button type="button" class="btn btn-primary" id="cfgCatQr">Ver QR</button>
+          </div>
+        </div>
+
+        <div class="cfg-card">
+          <h2 class="cfg-card-title">Acerca de esta app</h2>
+          <div class="cfg-info-row">
+            <span class="label">Sistema</span>
+            <span class="val">BALANCE-INV</span>
+          </div>
+          <div class="cfg-info-row">
+            <span class="label">Modo de datos</span>
+            <span class="val" id="cfgModoDatos">—</span>
+          </div>
+          <div class="cfg-info-row">
+            <span class="label">Sesión iniciada como</span>
+            <span class="val" id="cfgSesionComo">—</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>

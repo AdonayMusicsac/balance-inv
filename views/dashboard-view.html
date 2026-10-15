@@ -1,0 +1,146 @@
+<style>
+  .dash-period-group {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 999px;
+    padding: 3px; background: var(--surface-2); flex-shrink: 0;
+  }
+  .dash-period-pill {
+    border: none; background: none; cursor: pointer; font-family: var(--font-ui);
+    font-size: 12px; font-weight: 600; color: var(--text-3);
+    padding: 6px 12px; border-radius: 999px; transition: background var(--t), color var(--t);
+  }
+  .dash-period-pill.active { background: var(--ink); color: #fff; }
+
+  .dash-stat-delta {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 11px; font-weight: 700; margin-top: 3px;
+    padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  }
+  .dash-stat-delta.up   { background: var(--green-bg); color: var(--green); }
+  .dash-stat-delta.down { background: var(--red-bg);   color: var(--red); }
+  .dash-stat-delta.flat { background: var(--surface-2); color: var(--text-3); }
+</style>
+
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-title">
+      <h1>Dashboard</h1>
+      <p>Resumen general del negocio</p>
+    </div>
+    <div class="topbar-actions">
+      <div class="dash-period-group" id="dashPeriodGroup">
+        <button type="button" class="dash-period-pill" data-days="7" onclick="setDashPeriod(7)">7 días</button>
+        <button type="button" class="dash-period-pill" data-days="30" onclick="setDashPeriod(30)">30 días</button>
+        <button type="button" class="dash-period-pill" data-days="90" onclick="setDashPeriod(90)">90 días</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-content">
+
+    <div class="dash-stats">
+      <div class="stat-card">
+        <div class="stat-label">Valor de inventario</div>
+        <div class="stat-value" id="dashStockValue">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Productos registrados</div>
+        <div class="stat-value" id="dashProductCount">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Stock bajo</div>
+        <div class="stat-value" style="color:var(--red)" id="dashLowStock">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Clientes registrados</div>
+        <div class="stat-value" id="dashClientCount">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label" id="dashSalesLabel">Ventas — 30 días</div>
+        <div class="stat-value" id="dashSalesTotal">—</div>
+        <div id="dashSalesDelta"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Ticket promedio</div>
+        <div class="stat-value" id="dashAvgTicket">—</div>
+        <div id="dashAvgDelta"></div>
+      </div>
+    </div>
+
+    <div class="dash-grid">
+
+      <div class="dash-panel dash-chart-panel">
+        <div class="dash-panel-header">
+          <h2 id="dashSalesChartTitle">Ventas por día</h2>
+          <a href="#historial" class="dash-panel-link">Ver historial</a>
+        </div>
+        <div class="dash-chart-wrap">
+          <canvas id="dashSalesChart"></canvas>
+        </div>
+        <p class="dash-chart-empty" id="dashSalesChartEmpty" style="display:none">Todavía no hay ventas registradas en este período.</p>
+      </div>
+
+      <div class="dash-panel dash-chart-panel">
+        <div class="dash-panel-header">
+          <h2>Top productos vendidos</h2>
+          <span class="dash-panel-link" style="color:var(--text-3);cursor:default" id="dashTopProductsSub">en el período</span>
+        </div>
+        <div class="dash-chart-wrap">
+          <canvas id="dashTopProductsChart"></canvas>
+        </div>
+        <p class="dash-chart-empty" id="dashTopProductsChartEmpty" style="display:none">Todavía no hay ítems vendidos en este período.</p>
+      </div>
+
+    </div>
+
+    <div class="dash-grid" style="margin-top:16px">
+
+      <div class="dash-panel dash-chart-panel dash-admin-only">
+        <div class="dash-panel-header">
+          <h2>Ranking de vendedores</h2>
+          <span class="dash-panel-link" style="color:var(--text-3);cursor:default">por monto vendido</span>
+        </div>
+        <div class="dash-chart-wrap">
+          <canvas id="dashVendorChart"></canvas>
+        </div>
+        <p class="dash-chart-empty" id="dashVendorChartEmpty" style="display:none">Todavía no hay ventas registradas en este período.</p>
+      </div>
+
+      <div class="dash-panel dash-chart-panel">
+        <div class="dash-panel-header">
+          <h2>Inventario por almacén</h2>
+          <span class="dash-panel-link" style="color:var(--text-3);cursor:default">valor actual</span>
+        </div>
+        <div class="dash-chart-wrap">
+          <canvas id="dashWarehouseChart"></canvas>
+        </div>
+        <p class="dash-chart-empty" id="dashWarehouseChartEmpty" style="display:none">Todavía no hay productos con stock.</p>
+      </div>
+
+    </div>
+
+    <div class="dash-grid" style="margin-top:16px">
+
+      <div class="dash-panel">
+        <div class="dash-panel-header">
+          <h2>Stock bajo</h2>
+          <a href="#stock" class="dash-panel-link">Ver inventario</a>
+        </div>
+        <div id="dashLowStockList" class="dash-list">
+          <p class="dash-empty">Cargando…</p>
+        </div>
+      </div>
+
+      <div class="dash-panel">
+        <div class="dash-panel-header">
+          <h2>Últimas notas de pedido</h2>
+          <a href="#historial" class="dash-panel-link">Ver historial</a>
+        </div>
+        <div id="dashRecentOrders" class="dash-list">
+          <p class="dash-empty">Cargando…</p>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</main>

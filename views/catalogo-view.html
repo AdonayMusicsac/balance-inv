@@ -1,0 +1,27 @@
+<main class="main">
+  <div class="topbar"><div class="topbar-title"><h1>Catálogo público</h1><p>Link y QR para tus clientes</p></div></div>
+  <div class="page-content">
+    <div class="bal-card" id="catConfigCard">
+      <h3>Publicación</h3>
+      <p class="bal-note">El cliente solo ve nombre, categoría, foto y disponibilidad.</p>
+      <div class="bal-form">
+        <label class="cat-switch bal-wide"><input type="checkbox" id="catActivo"> Catálogo activo (visible con el link)</label>
+        <label class="bal-field"><span>Nombre que verá el cliente</span><input id="catNombre" placeholder="Ej.: Mi Empresa SAC" maxlength="80"></label>
+        <label class="bal-field"><span>WhatsApp para consultas</span><input id="catWa" inputmode="tel" placeholder="51987654321"><small>Con código de país, sin + ni espacios.</small></label>
+        <details class="bal-wide"><summary>Avanzado: cambiar la dirección web (opcional)</summary>
+          <label class="bal-field" style="margin-top:8px"><span>Dirección web de la app</span><input id="catUrl" inputmode="url" placeholder="https://www.miempresa.com"><small>Déjalo vacío: el link y el QR salen solos de la dirección donde publicaste la app (por ejemplo GitHub Pages).</small></label>
+        </details>
+      </div>
+      <p class="bal-note" style="margin-top:10px">Link: <strong id="catLink" style="word-break:break-all"></strong></p>
+      <div class="bal-bar"><button class="btn btn-primary" id="catGuardar">Guardar</button><button class="btn" id="catSync">Sincronizar ahora</button><button class="btn" id="catJson" title="Copia estática para GitHub Pages">Descargar catalogo.json</button><button class="btn" id="catCopiar">Copiar link</button><button class="btn" id="catCompartir">Compartir</button><button class="btn" id="catVerQr">Ver QR</button></div>
+    </div>
+    <div class="bal-card">
+      <h3>Productos y fotos</h3>
+      <p class="bal-note" id="catStats"></p>
+      <div class="bal-bar"><input id="catBuscar" placeholder="Buscar producto…"><select id="catFiltro"><option value="todos">Todos</option><option value="sinfoto">Sin foto</option><option value="oculto">No publicados</option></select></div>
+      <input type="file" id="catFile" accept="image/*" style="display:none">
+      <div class="cat-grid" id="catGrid"></div>
+      <button class="btn" id="catMas" style="display:none;margin-top:12px">Ver más</button>
+    </div>
+  </div>
+</main>
