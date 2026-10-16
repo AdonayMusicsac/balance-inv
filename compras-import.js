@@ -35,44 +35,106 @@
 
   // ── Texto (PDF u OCR): se buscan los datos típicos; las líneas se detectan sin importar el orden de las columnas ──
   const UNIDAD = /^(UND|UNID|UNIDAD|UNIDADES|NIU|ZZ|SET|PZA|PZ|PAR|CJA|CAJA|KG|MTR|LT|DOC)\.?$/i;
-  const MONEDA_TOK = /^(S\/\.?|PEN|USD|%|\$)$/i;
-  const esNum = s => /^(?:S\/\.?|\$)?\s*\d[\d.,]*$/.test(s);
+  const MONEDA_TOK = /^(S\/\.?|PEN|USD|US\$|%|\$)$/i;
+  const esNum = s => /^(?:US\$|USD|S\/\.?|\$)?\s*\d[\d.,]*$/i.test(s);
+  const DSC = /^\d{1,3}(?:\s?[-–+\/]\s?\d{1,3})+%?$|^\d{1,3}(?:[.,]\d+)?\s?%$/;   // columna de descuento: «10-6», «10+5», «5%»
   const STOP = /total|son:|igv|subtotal|importe|valor|observ|gracias|forma de pago|monto|hash|representaci|sunat|ruc|fecha|banco|cuenta|descuento|cantidad|descripci|gravada|inafecta|exonerad|gratuita|letras|s\/\s*\d/i;
 
-  // Busca cantidad × precio = importe entre los números de una línea (en cualquier orden de columnas).
-  function lineaProducto(raw) {
-    let toks = raw.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+  // Convierte una fila de texto en una lista de piezas (número, código, descuento, unidad o texto), separando lo que el PDF dejó pegado.
+  function tokenizar(raw) {
+    let toks = raw.split(/\s{2,}/).map(x => x.trim()).filter(Boolean);
     if (toks.length < 4) toks = raw.split(/\s+/).filter(Boolean);
-    if (toks.length < 3 || toks.length > 60) return null;
-    const m0 = toks[0].match(/^(\d+(?:[.,]\d+)?)\s+(\S.*)$/);   // «1 VB117Y1/4»: cantidad y modelo pegados en una sola celda
-    if (m0) toks = [m0[1], m0[2], ...toks.slice(1)];
-    const nums = [], textos = [], crudos = [], codNum = [];
+    const seq = [];
+    const push = (txt, pegado) => {
+      const tipo = /^0\d{2,}$/.test(txt) || /^\d{5,}$/.test(txt) ? 'cod' : esNum(txt) ? 'num' : DSC.test(txt) ? 'dsc' : UNIDAD.test(txt) || MONEDA_TOK.test(txt) ? 'uni' : 'txt';
+      seq.push({ txt, tipo, pegado: !!pegado, val: tipo === 'num' ? num(txt) : 0 });
+    };
     toks.forEach((t, i) => {
-      if (/^0\d{2,}$/.test(t) || /^\d{5,}$/.test(t)) { codNum.push(t); return; }   // «00019», «062033039»: es un código, no una cantidad ni un precio
-      if (esNum(t)) { nums.push(num(t)); crudos.push(t); }
-      else if (/^\d{1,3}(?:\s?[-–+\/]\s?\d{1,3})+%?$/.test(t) && toks.slice(i + 1).some(esNum)) return;   // columna de descuento («10-6», «10+5») entre las de precio: no es parte de la descripción
-      else if (!UNIDAD.test(t) && !MONEDA_TOK.test(t)) textos.push(t);
+      const ws = t.split(/\s+/);
+      if (ws.length > 1 && ws.every(w => esNum(w) || DSC.test(w) || /^\d{5,}$/.test(w))) { ws.forEach(w => push(w)); return; }   // «10-6 965.81»
+      const mu = t.match(/^(\d[\d.,]*)\s+([A-Za-z]{1,8}\.?)$/);                                                                  // «10.00 NIU»: cantidad y unidad en una misma celda
+      if (mu && UNIDAD.test(mu[2])) { push(mu[1]); push(mu[2]); return; }
+      const m0 = i === 0 ? t.match(/^(\d+(?:[.,]\d+)?)\s+(\S.*)$/) : null;                                                    // «1 VB117Y1/4»: cantidad pegada al modelo
+      if (m0) { push(m0[1]); t = m0[2]; }
+      const mt = t.match(/^(.*[A-Za-zÁÉÍÓÚÑ].*?)\s+(\d[\d,]*\.\d{2}(?:\s+\d[\d,]*\.\d{2})*)$/);                                // «DESCRIPCION 42.37»: precio pegado al texto
+      if (mt && !esNum(t)) { push(mt[1]); mt[2].split(/\s+/).forEach(w => push(w, true)); return; }
+      push(t);
     });
+    return seq;
+  }
+  // Arma código y descripción con las piezas que no se usaron como cantidad o precio.
+  // Un número que queda DENTRO de la descripción («CABLE 3 M», «TECLADO 61 TECLAS») vuelve a ella; las columnas de descuento (número · «10-6» · número) no.
+  function armarTexto(seq, usados) {
+    const iTxt = seq.map((e, i) => e.tipo === 'txt' && !usados.has(i) ? i : -1).filter(i => i >= 0);
+    const ini = iTxt.length ? iTxt[0] : -1, fin = iTxt.length ? iTxt[iTxt.length - 1] : -1;
+    const textos = [], extras = [];
+    seq.forEach((e, i) => {
+      if (usados.has(i)) return;
+      if (e.tipo === 'txt') { textos.push(e.txt); return; }
+      const dentro = i > ini && i < fin;
+      const esColumnaDsc = e.tipo === 'dsc' && seq[i - 1] && seq[i - 1].tipo === 'num' && seq[i + 1] && seq[i + 1].tipo === 'num';
+      if (e.tipo === 'dsc' && seq[i - 1] && seq[i - 1].tipo === 'txt') textos.push(e.txt);   // «… SM-58 10-6»: pegado al texto, es parte del nombre
+      else if (e.tipo === 'cod' && !dentro) extras.push(e.txt);
+      else if (e.tipo === 'cod' || e.tipo === 'num' || e.tipo === 'dsc') { if (dentro && !esColumnaDsc) textos.push(e.txt); else if (e.tipo === 'num' && e.pegado) textos.push(e.txt); }
+    });
+    let codigo = '', desc = textos;
+    if (textos.length >= 2 && /[\d-]/.test(textos[0]) && textos[0].length <= 25 && !/\s/.test(textos[0])) { codigo = textos[0]; desc = textos.slice(1); }
+    if (!codigo) codigo = extras[0] || '';
+    return { codigo, desc: desc.join(' ').replace(/\s{2,}/g, ' ').trim() };
+  }
+
+  // Busca cantidad × precio = importe entre los números de una línea, sin importar el orden de las columnas.
+  // También entiende: precio sin IGV junto a su importe con IGV, y columnas de descuento (% o precio con descuento).
+  function lineaProducto(raw, precioPrimero) {
+    const seq = tokenizar(raw);
+    if (seq.length < 3 || seq.length > 60) return null;
+    const idx = seq.map((e, i) => e.tipo === 'num' ? i : -1).filter(i => i >= 0), nums = idx.map(i => seq[i].val);
     if (nums.length < 3 || nums.length > 12) return null;
-    let mejor = null;
+    const tolDe = t => Math.max(0.05, 0.005 * t);
+    const iTx = seq.map((e, i) => e.tipo === 'txt' ? i : -1).filter(i => i >= 0), t0 = iTx.length ? iTx[0] : -1, t1 = iTx.length ? iTx[iTx.length - 1] : -1;
+    const dentro = k => idx[k] > t0 && idx[k] < t1;   // un número metido en medio del texto suele ser parte de la descripción
+    const cands = [];
+    const nuevo = (c, clase, precio, errAbs) => cands.push({ ...c, clase, precio, errAbs, err: errAbs / c.t, penal: c.usa.filter(dentro).length, pdec: /[.,]\d/.test(seq[idx[c.b]].txt) ? 0 : 1, orden: c.usa.every((k, i) => !i || c.usa[i - 1] < k) });
     for (let a = 0; a < nums.length; a++) for (let b = 0; b < nums.length; b++) for (let c = 0; c < nums.length; c++) {
       if (a === b || b === c || a === c) continue;
       const q = nums[a], p = nums[b], t = nums[c];
       if (!(q > 0) || !(t > 0) || q > 100000) continue;
-      const tol = Math.max(0.05, 0.005 * t);
-      let exacto;
-      if (Math.abs(q * p - t) <= tol) exacto = true; else if (Math.abs(q * p * IGV - t) <= tol) exacto = false; else continue;
-      const cand = { a, b, c, q, precio: exacto ? p : r2(p * IGV), t, exacto, orden: a < b && b < c };
-      const mejorQue = !mejor || (cand.exacto !== mejor.exacto ? cand.exacto : cand.t !== mejor.t ? cand.t > mejor.t : cand.orden !== mejor.orden ? cand.orden : false);
-      if (mejorQue) mejor = cand;
+      const base = { a, b, c, q, t, usa: [a, b, c] };
+      const e1 = Math.abs(q * p - t), e2 = Math.abs(q * p * IGV - t);
+      if (e1 <= tolDe(t)) nuevo(base, 0, p, e1); else if (e2 <= tolDe(t)) nuevo(base, 2, r2(p * IGV), e2);
     }
-    if (!mejor) return null;
-    let codigo = '', desc = textos;
-    if (textos.length >= 2 && /[\d-]/.test(textos[0]) && textos[0].length <= 25) { codigo = textos[0]; desc = textos.slice(1); }
-    if (!codigo) { const k = crudos.find((s, i) => i !== mejor.a && i !== mejor.b && i !== mejor.c && /^\d{4,}$/.test(s)); codigo = k || codNum[0] || ''; }
-    const d = desc.join(' ').trim();
-    if (!d && !codigo) return null;
-    return { codigo, desc: d, qty: mejor.q, precio: mejor.precio };
+    for (let a = 0; a < nums.length; a++) for (let b = 0; b < nums.length; b++) for (let d = 0; d < nums.length; d++) for (let c = 0; c < nums.length; c++) {   // cantidad × precio × (1 − descuento %) = importe
+      if (new Set([a, b, c, d]).size < 4) continue;
+      const q = nums[a], p = nums[b], dc = nums[d], t = nums[c];
+      if (!(q > 0) || !(t > 0) || q > 100000 || !(dc > 0 && dc <= 100) || !(p > 0)) continue;
+      const e = Math.abs(q * p * (1 - dc / 100) - t);
+      if (e <= tolDe(t)) nuevo({ a, b, c, q, t, usa: [a, b, c, d] }, 1, r2(t / q), e);
+    }
+    if (!cands.length) return null;
+    const buenas = cands.filter(c => c.errAbs <= 0.02 || c.err <= 0.002);   // una coincidencia casual rara vez es tan exacta
+    const pool = buenas.length ? buenas : cands;
+    const mejor = pool.reduce((m, c) => {
+      if (!m) return c;
+      if (c.clase !== m.clase) return c.clase < m.clase ? c : m;
+      if (c.penal !== m.penal) return c.penal < m.penal ? c : m;
+      if (c.pdec !== m.pdec) return c.pdec < m.pdec ? c : m;   // un precio suele traer decimales; una cantidad o el n.º de ítem, no
+      const ord = x => (precioPrimero ? x.b < x.a && x.a < x.c : x.a < x.b && x.b < x.c) ? 0 : 1;   // orden de columnas esperado (según la cabecera de la tabla)
+      if (ord(c) !== ord(m)) return ord(c) < ord(m) ? c : m;
+      const qi = x => Number.isInteger(x.q) ? 0 : 1;   // la cantidad suele ser entera; el precio, no
+      if (qi(c) !== qi(m)) return qi(c) < qi(m) ? c : m;
+      if (c.t !== m.t) return c.t > m.t ? c : m;
+      if (Math.abs(c.err - m.err) > 1e-9) return c.err < m.err ? c : m;
+      return c.orden && !m.orden ? c : m;
+    }, null);
+    if (mejor.clase === 0) {   // ¿hay además un importe con IGV (≈ total × 1,18) a su derecha? Entonces el precio leído iba sin IGV.
+      const j = nums.findIndex((x, k) => k > mejor.b && k > mejor.c && !mejor.usa.includes(k) && Math.abs(x - mejor.t * IGV) <= tolDe(x));
+      if (j >= 0) { mejor.precio = r2(nums[j] / mejor.q); mejor.usa.push(j); }
+    }
+    const usados = new Set(mejor.usa.map(k => idx[k]));
+    const { codigo, desc } = armarTexto(seq, usados);
+    if (!desc && !codigo) return null;
+    if (NO_PRODUCTO.test(desc)) return null;
+    return { codigo, desc, qty: mejor.q, precio: mejor.precio };
   }
 
   // Nombre corto para Stock: lo que va antes de «CON …», «EN …» o una comilla; la descripción completa queda aparte.
@@ -84,44 +146,77 @@
     return d.split(' ').slice(0, 5).join(' ');
   }
   // Líneas que NO pueden ser el nombre del proveedor (direcciones, teléfonos, datos del cliente, forma de pago, bancos, columnas…).
-  const RUIDO_NOMBRE = /factura|boleta|cliente|se[ñn]or|adquirente|direcci|^dir\b|dir\.|local|\bjr\b|jr\.|\bav\b|av\.|calle|\bcal\b|cal\.|urb\.|distrito|telf|tel[eé]f|tel:|@|www\.|\.com|\.pe\b|correo|e-mail|ruc|fecha|gu[ií]a|forma\s*(?:de\s*)?pago|cr[eé]dito|contado|condici|vendedor|moneda|o\/c|orden de|vencim|observ|banco|cuenta|bcp|bbva|interbank|total|monto|importe|valor|igv|descuento|cantidad|descripci|c[oó]digo|unidad|\bnro\b|n[°º]|p[aá]gina|representaci|sunat|electr[oó]nica/i;
+  const RUIDO_NOMBRE = /factura|boleta|cliente|se[ñn]or|adquirente|direcci|^dir\b|dir\.|local|\bjr\b|jr\.|\bav\b|av\.|\bpj\b|pj\.|\bpsj\b|\bmz\b|\blote\b|calle|\bcal\b|cal\.|urb\.|whatsapp|mensaje|precio|unitario|\bunit\b|dscto|desct|\bcant\b|\bitem\b|subtotal|\bigv\b|distrito|telf|tel[eé]f|tel:|@|www\.|\.com|\.pe\b|correo|e-mail|ruc|fecha|gu[ií]a|forma\s*(?:de\s*)?pago|cr[eé]dito|contado|condici|vendedor|moneda|o\/c|orden de|vencim|observ|banco|cuenta|bcp|bbva|interbank|total|monto|importe|valor|igv|descuento|cantidad|descripci|c[oó]digo|unidad|\bnro\b|n[°º]|p[aá]gina|representaci|sunat|electr[oó]nica/i;
   // Para nombres ya guardados solo se descartan los que claramente son una dirección o un dato suelto.
   const parecedireccion = x => /dir\.|direcci|local:|\bjr\b|jr\.|\bav\.|\bcalle\b|urb\.|telf|@|www\.|\.com|forma\s*pago|cr[eé]dito\s*\d/i.test(String(x || ''));
   // Filas con solo cantidad y precio unitario (sin columna de importe): se usan únicamente si no se pudo leer ninguna fila completa.
   function lineaSimple(raw) {
-    let toks = raw.split(/\s{2,}/).map(x => x.trim()).filter(Boolean);
-    if (toks.length < 4) toks = raw.split(/\s+/).filter(Boolean);
-    const nums = [], textos = [], codNum = [];
-    toks.forEach(t => {
-      if (/^0\d{2,}$/.test(t) || /^\d{5,}$/.test(t)) codNum.push(t);
-      else if (esNum(t)) nums.push(num(t));
-      else if (!UNIDAD.test(t) && !MONEDA_TOK.test(t)) textos.push(t);
-    });
-    if (nums.length !== 2 || !textos.length || !(nums[0] > 0) || nums[0] > 100000 || !(nums[1] > 0)) return null;
-    let codigo = codNum[0] || '', desc = textos;
-    if (!codigo && textos.length >= 2 && /[\d-]/.test(textos[0]) && textos[0].length <= 25) { codigo = textos[0]; desc = textos.slice(1); }
-    return { codigo, desc: desc.join(' ').trim(), qty: nums[0], precio: nums[1] };
+    const seq = tokenizar(raw);
+    const idx = seq.map((e, i) => e.tipo === 'num' ? i : -1).filter(i => i >= 0);
+    const iTx = seq.map((e, i) => e.tipo === 'txt' ? i : -1).filter(i => i >= 0);
+    if (idx.length < 2 || !iTx.length) return null;
+    // cantidad = primer número, precio = último; los de en medio solo valen si están dentro de la descripción («… 0.73 X12»)
+    const medios = idx.slice(1, -1);
+    if (medios.some(i => !(i > iTx[0] && i < iTx[iTx.length - 1]))) return null;
+    const q = seq[idx[0]].val, p = seq[idx[idx.length - 1]].val;
+    if (!(q > 0) || q > 100000 || !(p > 0)) return null;
+    const { codigo, desc } = armarTexto(seq, new Set([idx[0], idx[idx.length - 1]]));
+    return (desc || codigo) && !NO_PRODUCTO.test(desc) ? { codigo, desc, qty: q, precio: p } : null;
   }
+  // Dígito verificador del RUC (módulo 11): detecta cifras mal leídas por el OCR.
+  function rucValido(r) {
+    if (!/^\d{11}$/.test(String(r || ''))) return false;
+    const w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]; let sum = 0;
+    for (let i = 0; i < 10; i++) sum += Number(r[i]) * w[i];
+    let d = 11 - (sum % 11); if (d === 10) d = 0; else if (d === 11) d = 1;
+    return d === Number(r[10]);
+  }
+  const CONFUSAS = { 0: '869', 1: '7', 2: '7', 3: '85', 4: '9', 5: '683', 6: '580', 7: '12', 8: '03659', 9: '480' };
+  // Si el OCR cambió UNA cifra, se busca la única corrección parecida (6↔8, 5↔6…) que da un RUC válido.
+  function repararRuc(r) {
+    if (rucValido(r)) return r;
+    const out = [];
+    for (let i = 2; i < 11; i++) for (const d of CONFUSAS[r[i]] || '') { const c = r.slice(0, i) + d + r.slice(i + 1); if (rucValido(c)) out.push(c); }
+    return out.length === 1 ? out[0] : r;
+  }
+  // Filas de totales, cuotas o pie de página que casualmente cumplen «1 × 118,00 = 118,00»: no son productos.
+  const NO_PRODUCTO = /^(?:sub\s*total|total|importe|igv|op\.?\s|gravad|inafect|exonerad|gratuit|descuento|cuota|nro\.?\s*cuota|gracias|p[aá]gina|pag\.|forma\s+de\s+pago|condici|vencim|son:|observ|icbper|otros\s+cargos|saldo|monto|precio\s+de\s+venta|valor\s+(?:de\s+)?venta)/i;
   const MESES = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, setiembre: 9, septiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 };
   function parseTexto(texto, origen) {
     const t = String(texto || '').replace(/\r/g, '');
     const filas0 = t.split('\n').map(x => x.trim().replace(/\s{2,}/g, ' ')).filter(Boolean);
-    // El RUC del proveedor es el del emisor, no el del cliente: se descarta el RUC que está junto a «SEÑOR(ES)» / «CLIENTE».
+    // El RUC del proveedor es el del emisor, no el del cliente. Las filas junto a «SEÑOR(ES)», «CLIENTE», «DATOS DEL CLIENTE»… son la zona del cliente.
     const reRuc = /\b(20\d{9}|10\d{9})\b/g;
-    const iCli = filas0.findIndex(x => /se[ñn]or(?:es)?\b|cliente|adquirente/i.test(x));
-    const rucsCli = new Set();
-    if (iCli >= 0) for (let k = Math.max(0, iCli - 1); k <= Math.min(filas0.length - 1, iCli + 1); k++) (filas0[k].match(reRuc) || []).forEach(r => rucsCli.add(r));
-    const ruc = (t.match(reRuc) || []).find(r => !rucsCli.has(r)) || '';
-    // Serie y número: «F001-123», «F001 - 000123», «F001 Nº 000123», o la serie en una fila y el número en la siguiente.
-    let m = t.match(/\b([FEBfeb][A-Za-z0-9]{3})\s*[-–]\s*(?:N[°ºo.]*\s*)?(\d{1,10})\b/) || t.match(/\b([FEBfeb][A-Za-z0-9]{3})\s+N[°ºo.]*\s*(\d{1,10})\b/);
-    if (!m) {
-      for (let i = 0; i < filas0.length && !m; i++) {
-        const sm = filas0[i].match(/\b([FEB]\d{3}|[FEB][A-Z]\d{2})\b/);
-        if (!sm) continue;
-        const resto = filas0[i].slice(filas0[i].indexOf(sm[1]) + sm[1].length) + ' ' + (filas0[i + 1] || '');
-        const nm = resto.match(/(?:N[°ºo.]*\s*|[-–]\s*)(\d{1,10})\b/) || resto.match(/\b(\d{4,10})\b/) || resto.match(/^\s*(\d{1,10})(?![\d\/.]|-\d)/);   // «E001 20-»: el número sigue a la serie
-        if (nm) m = [null, sm[1], nm[1]];
-      }
+    const zonaCli = new Set();
+    const CAMPO_CLI = /^\s*(?:ruc|dni|denominaci|nombre|direcci|domicilio|tel[eé]f)/i;
+    filas0.forEach((x, i) => {
+      if (!/se[ñn]or(?:es)?\b|cliente|adquirente/i.test(x)) return;
+      for (let k = i - 1; k <= i + 1; k++) zonaCli.add(k);
+      for (let k = i + 2; k <= i + 5 && CAMPO_CLI.test(filas0[k - 1] || '') || (k === i + 2 && CAMPO_CLI.test(filas0[k] || '')); k++) zonaCli.add(k);   // las filas de datos del cliente que siguen (RUC, denominación, dirección…)
+    });
+    const rucsCli = new Set(); zonaCli.forEach(k => (filas0[k] || '').match(reRuc) && filas0[k].match(reRuc).forEach(r => rucsCli.add(r)));
+    let ruc = (t.match(reRuc) || []).find(r => !rucsCli.has(r)) || '';
+    if (ruc && /OCR/i.test(origen || '')) ruc = repararRuc(ruc);   // texto leído por OCR: se corrige una cifra mal leída
+    // Serie y número: «F001-123», «F001 - 000123», «F001 Nº 000123», «E001 20-», o la serie en una fila y el número en la siguiente.
+    let m = null;
+    {
+      const iTabla = filas0.findIndex(x => /cant/i.test(x) && /descripci|detalle|producto|c[oó]digo/i.test(x));
+      const hasta = iTabla > 0 ? iTabla : filas0.length;
+      const numeroTras = (resto, siguiente) =>
+        (resto.match(/^\s*[-–]\s*(?:N(?:ro)?[°ºo*.:]*\s*)?(\d{1,10})\b/) || resto.match(/^\s+N(?:ro)?[°ºo*.:]*\s*(\d{1,10})\b/) || resto.match(/^\s*(\d{1,10})(?![\d\/.]|-\d)/)
+          || (!resto.trim() && siguiente && siguiente.length < 30 ? siguiente.match(/^\s*(?:N(?:ro)?[°ºo*.:]*\s*)?(\d{1,10})\b/) : null) || [])[1];
+      const buscar = pasada => {
+        for (let i = 0; i < hasta && !m; i++) {
+          const cerca = [filas0[i - 1], filas0[i], filas0[i + 1]].join(' ');
+          if (pasada === 1 && !/factura|boleta|electr[oó]nic|comprobante/i.test(cerca)) continue;
+          for (const sm of filas0[i].matchAll(/\b([FEB][A-Z0-9]{3})\b/g)) {
+            if (!/\d/.test(sm[1])) continue;
+            const num = numeroTras(filas0[i].slice(sm.index + sm[1].length), filas0[i + 1]);
+            if (num) { m = [null, sm[1], num]; break; }
+          }
+        }
+      };
+      buscar(1); if (!m) buscar(2);
     }
     const pad2 = n => String(n).padStart(2, '0');
     const l1 = t.match(/emisi[oó]n\s*:?\s*(\d{4})-(\d{1,2})-(\d{1,2})/i), l2 = t.match(/emisi[oó]n\s*:?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/i);
@@ -133,12 +228,19 @@
       if (!fecha && f3 && MESES[f3[2].toLowerCase()]) fecha = `${f3[3]}-${pad2(MESES[f3[2].toLowerCase()])}-${pad2(f3[1])}`;
     }
     const lineas = []; let ultima = null, cont = 0;
-    t.split('\n').forEach(raw => {
+    const todas = t.split('\n').map(x => x.trim());
+    const iHead0 = todas.findIndex(x => /\b(?:cant|cantidad|qty)\b/i.test(x) && /descripci|detalle|producto|description|c[oó]digo|code|item/i.test(x));
+    const cab = iHead0 >= 0 ? todas[iHead0] + ' ' + (todas[iHead0 + 1] || '') : '';
+    const posCant = cab.search(/\b(?:cant|cantidad|qty)\b/i), posPrecio = cab.search(/\bp\.?\s?u(?:nit)?\b|precio|valor\s+unit|\bunit/i);
+    const precioPrimero = posCant >= 0 && posPrecio >= 0 ? posPrecio < posCant : null;   // ¿la columna de precio va antes que la de cantidad?
+    const iFin0 = iHead0 >= 0 ? todas.findIndex((x, i) => i > iHead0 && /^(?:sub\s*total|total\b|op\.?\s*gravada|valor\s+(?:de\s+)?venta|importe\s+total|son:|gravada\b)/i.test(x)) : -1;
+    t.split('\n').forEach((raw, ri) => {
       const l = raw.trim();
-      const it = l ? lineaProducto(l) : null;
+      const enTabla = iHead0 < 0 || (ri > iHead0 && (iFin0 < 0 || ri < iFin0));   // con cabecera de tabla, solo cuentan las filas entre ella y los totales
+      const it = l && enTabla ? lineaProducto(l, precioPrimero) : null;
       if (it) { lineas.push(it); ultima = it; cont = 0; return; }
       // Descripción larga que continúa en la fila de abajo (sin números de cantidad/precio).
-      if (ultima && cont < 2 && l.length >= 3 && l.length <= 90 && /[A-Za-zÁÉÍÓÚ]{3}/.test(l) && !STOP.test(l) && !/\d+[.,]\d{2}\b/.test(l) && !/\b[FEBfeb][A-Za-z0-9]{3}\s*-\s*\d/.test(l)) { ultima.desc = (ultima.desc + ' ' + l.replace(/\s{2,}/g, ' ')).trim(); cont++; }
+      if (enTabla && ultima && cont < 2 && l.length >= 3 && l.length <= 90 && /[A-Za-zÁÉÍÓÚ]{3}/.test(l) && !STOP.test(l) && !/\d+[.,]\d{2}\b/.test(l) && !/\b[FEBfeb][A-Za-z0-9]{3}\s*-\s*\d/.test(l)) { ultima.desc = (ultima.desc + ' ' + l.replace(/\s{2,}/g, ' ')).trim(); cont++; }
       else ultima = null;
     });
     // Segunda pasada: facturas que traen solo cantidad y precio unitario (sin importe). Se leen entre la cabecera de la tabla y los totales.
@@ -160,22 +262,46 @@
     const filas = filas0;
     const crudas = t.split('\n').map(x => x.trim()).filter(Boolean);   // con los espacios dobles que separan columnas
     const SUFIJO = /\b(S\.?A\.?C|S\.?R\.?L|E\.?I\.?R\.?L|S\.?A\.?A|S\.?A)\b\.?/i;
-    const limpiar = x => x.replace(/R\.?\s?U\.?\s?C\.?\s*(?:N[°ºo.]*)?\s*:?/gi, ' ').replace(new RegExp(ruc || '#####', 'g'), ' ').replace(/[:|]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    const valido = x => x.length >= 4 && /[A-Za-zÁÉÍÓÚÑ]{4}/.test(x) && !RUIDO_NOMBRE.test(x) && !/\d{5,}/.test(x) && !esNum(x);
-    const celdas = k => (crudas[k] || '').split(/\s{2,}/).map(limpiar).filter(Boolean);   // una fila puede traer el nombre del emisor y, al lado, el recuadro de la factura
-    const limite = iCli < 0 ? filas.length : iCli;   // lo que va después de «SEÑOR(ES)» es el cliente, no el proveedor
-    let prov = '';
+    const limpiar = x => x.replace(/^(?:raz[oó]n social|proveedor|emisor|empresa|nombre|denominaci[oó]n)\s*:?\s*/i, '').replace(/R\.?\s?U\.?\s?C\.?\s*(?:N[°ºo.]*)?\s*:?/gi, ' ').replace(new RegExp(ruc || '#####', 'g'), ' ').replace(/[:|]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const FECHA_TXT = /\b\d{1,2}\s+de\s+[a-záéíóú]+|\b\d{1,4}[\/-]\d{1,2}[\/-]\d{1,4}\b/i;
+    const valido = x => x.length >= 4 && /[A-Za-zÁÉÍÓÚÑ]{4}/.test(x) && !RUIDO_NOMBRE.test(x) && !/\d{5,}/.test(x) && !esNum(x) && !FECHA_TXT.test(x);
+    const celdas = k => {   // una fila puede traer el nombre del emisor y, al lado, el recuadro de la factura; se descartan los valores de rótulos («Fecha : 2 de julio…»)
+      if (zonaCli.has(k)) return [];
+      const cs = (crudas[k] || '').split(/\s{2,}/), out = [];
+      cs.forEach((c, i) => { if (/^\s*:/.test(c) || (i > 0 && /:\s*$/.test(cs[i - 1]))) return; const l = limpiar(c); if (l) out.push(l); });
+      return out;
+    };
     const iRuc = ruc ? filas.findIndex(x => x.includes(ruc)) : -1;
-    if (iRuc >= 0) {
-      prov = celdas(iRuc).find(valido) || '';                  // «HERCULES PERU SAC  RUC 2060…»
-      for (let k = iRuc - 1; k >= Math.max(0, iRuc - 3) && !prov; k--) prov = celdas(k).find(valido) || '';   // el nombre suele ir justo encima del RUC
+    const iTabla2 = filas.findIndex(x => /cant/i.test(x) && /descripci|detalle|producto|c[oó]digo/i.test(x));
+    const hasta2 = iTabla2 > 0 ? iTabla2 : Math.min(filas.length, 30);
+    let prov = '';
+    for (let k = 0; k < hasta2 && !prov; k++) { if (zonaCli.has(k)) continue; const mm = filas[k].match(/^(?:raz[oó]n social|proveedor|emisor|empresa)\s*:\s*(.+)$/i); if (mm && valido(limpiar(mm[1]))) prov = limpiar(mm[1]); }
+    if (!prov) {
+      // ¿Cuál fila parece un nombre de empresa? Mayúsculas, sufijo S.A.C./E.I.R.L., cerca del RUC y sin aspecto de frase (los lemas llevan «de», «y», «para»…).
+      let mejor = null;
+      for (let k = 0; k < hasta2; k++) for (const c of celdas(k)) {
+        if (!valido(c)) continue;
+        const letras = c.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, ''), mayus = letras.replace(/[^A-ZÁÉÍÓÚÑ]/g, '');
+        let sc = (SUFIJO.test(c) ? 3 : 0) + (letras.length && mayus.length / letras.length >= 0.7 ? 2 : 0);
+        if (/^[a-záéíóúñ]/.test(c)) sc -= 3;
+        sc -= 2 * Math.min((c.match(/\b(?:de|del|y|para|con|las|los|la|el|en|por|todo|tipo)\b/g) || []).length, 2);
+        const nw = c.split(/\s+/).length; if (nw > 8) sc -= 2; if (nw < 2 && !SUFIJO.test(c)) sc -= 1.5;
+        if (/\d/.test(c)) sc -= 2;
+        sc -= iRuc >= 0 ? 0.1 * Math.abs(k - iRuc) : 0.05 * k;
+        if (sc >= -0.6 && (!mejor || sc > mejor.sc)) mejor = { sc, c };
+      }
+      if (mejor) prov = mejor.c;
     }
-    if (!prov) for (const x of filas.slice(0, limite)) { const mm = x.match(/^(?:raz[oó]n social|proveedor|emisor|empresa)\s*:\s*(.+)$/i); if (mm && valido(limpiar(mm[1]))) { prov = limpiar(mm[1]); break; } }
-    if (!prov) for (let k = 0; k < limite && !prov; k++) prov = celdas(k).find(c => SUFIJO.test(c) && valido(c)) || '';
-    // Si no hay nombre en el texto (p. ej. está solo en el logo) se deja vacío: mejor vacío que un dato equivocado.
+    // Nunca el nombre del cliente (la empresa que compra), aunque aparezca fuera de su bloque.
+    const nombresCli = new Set(); zonaCli.forEach(k => (crudas[k] || '').split(/\s{2,}/).forEach(c => { const l = limpiar(c).toUpperCase(); if (l) nombresCli.add(l); }));
+    if (prov && nombresCli.has(prov.toUpperCase())) prov = '';
     const monLinea = (t.match(/MONEDA\s*:?\s*([A-Za-zÁÉÓÚ\/\.$]+)/i) || [])[1] || '';
     const usd = monLinea ? /d[óo]lar|usd|us\$/i.test(monLinea) : /d[óo]lares americanos|\bUSD\b|US\s?\$/i.test(t) && !/son:[^\n]*soles/i.test(t);
-    return { origen, tipo: /boleta/i.test(t) && !/factura/i.test(t) ? 'Boleta' : 'Factura', serie: m ? m[1].toUpperCase() : '', numero: m ? m[2] : '', fecha, moneda: usd ? 'USD' : 'PEN', proveedor: prov, ruc, lineas };
+    // Tipo: primero el título («BOLETA DE VENTA ELECTRÓNICA» / «FACTURA ELECTRÓNICA»), luego la serie (B… = boleta, F… = factura), luego las palabras sueltas.
+    const titulo = (t.match(/(factura|boleta)\s+(?:de\s+venta\s+)?electr[oó]nica/i) || [])[1];
+    const serieDoc = m ? m[1].toUpperCase() : '';
+    const esBoleta = titulo ? /boleta/i.test(titulo) : /^B/.test(serieDoc) ? true : /^F/.test(serieDoc) ? false : /boleta/i.test(t) && !/factura/i.test(t);
+    return { origen, tipo: esBoleta ? 'Boleta' : 'Factura', serie: m ? (/OCR/i.test(origen || '') ? m[1].toUpperCase().replace(/O/g, '0') : m[1].toUpperCase()) : '', numero: m ? m[2] : '', fecha, moneda: usd ? 'USD' : 'PEN', proveedor: prov, ruc, rucDudoso: !!ruc && !rucValido(ruc), lineas };
   }
 
   const cargarScript = src => new Promise((ok, no) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('No se pudo cargar el lector (¿hay internet?).')); document.head.appendChild(s); });
@@ -268,7 +394,7 @@
 
   async function leerArchivo(file, onEstado, resolver) {
     const completarPorRuc = async res => {   // el nombre del proveedor (razón social) se busca por su RUC
-      if (!res.proveedor && res.ruc && resolver) {
+      if ((!res.proveedor || (res.ocr && rucValido(res.ruc))) && res.ruc && resolver) {
         if (onEstado) onEstado('Buscando el proveedor por su RUC…');
         try { const nm = await resolver(res.ruc); if (nm) { res.proveedor = nm; res.proveedorPorRuc = true; } } catch (e) { /* sigue con las otras opciones */ }
       }
@@ -326,7 +452,7 @@
     ov.innerHTML = `<div class="modal ci-modal" role="dialog" aria-modal="true">
       <div class="modal-header"><div><h2>Revisa lo leído del comprobante</h2><p>Origen: ${esc(borrador.origen)}</p></div></div>
       <div class="modal-body">
-        <div class="ci-warn">${borrador.ocr ? '⚠ Leído por OCR: revisa cada dato.' : 'Compara con el documento y corrige lo que haga falta.'}${borrador.proveedorOcr ? ' El nombre del proveedor se leyó del logo: verifícalo.' : ''}${borrador.proveedorPorRuc ? ' Proveedor obtenido por su RUC.' : ''}${borrador.moneda === 'USD' ? ' Esta factura está en dólares: los precios se registran tal cual, sin convertir. Edítalos si los quieres en soles.' : ''}</div>
+        <div class="ci-warn">${borrador.ocr ? '⚠ Leído por OCR: revisa cada dato.' : 'Compara con el documento y corrige lo que haga falta.'}${borrador.proveedorOcr ? ' El nombre del proveedor se leyó del logo: verifícalo.' : ''}${borrador.proveedorPorRuc ? ' Proveedor obtenido por su RUC.' : ''}${borrador.rucDudoso ? ' ⚠ El RUC no tiene un dígito verificador válido: revísalo.' : ''}${borrador.moneda === 'USD' ? ' Esta factura está en dólares: los precios se registran tal cual, sin convertir. Edítalos si los quieres en soles.' : ''}</div>
         <div class="bal-form">
           <label class="bal-field"><span>Proveedor <a href="#" id="ciProvBuscar" style="font-weight:500;font-size:12px;margin-left:6px">Buscar por RUC</a></span><input id="ciProv" placeholder="${borrador.proveedor ? '' : 'Escribe el proveedor (no se pudo leer)'}" value="${esc(borrador.proveedor)}"></label>
           <label class="bal-field"><span>RUC</span><input id="ciRuc" inputmode="numeric" maxlength="11" value="${esc(borrador.ruc)}"></label>
@@ -375,5 +501,5 @@
     q('ciGuardar').onclick = () => aprobar(true);      // rellena y guarda la compra
   }
 
-  window.ComprasImport = { consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
+  window.ComprasImport = { rucValido, repararRuc, consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
 })();
