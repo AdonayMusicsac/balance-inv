@@ -2,7 +2,7 @@
 // BALANCE-INV — Catálogo público + fotos de producto
 // =========================================================
 // El catálogo público es una COPIA reducida de los productos en catalogoPublico/productos:
-// solo nombre, categoría, foto y "disponible" (sí/no). Nunca precios, costos, cantidades
+// solo nombre, descripción, categoría, foto y "disponible" (sí/no). Nunca precios, costos, cantidades
 // ni el tipo importado/nacional. catalogo-publico.html lee únicamente ese nodo.
 const refCatalogoPublico = db.ref('catalogoPublico');
 const CAT_PAGINA = 24;
@@ -17,6 +17,8 @@ function productoPublico(p) {
     imagen: _urlHttps(p.image),
     disponible: (Number(p.stock) || 0) > 0
   };
+  const d = String(p.desc || '').replace(/\s+/g, ' ').trim().slice(0, 300);   // la descripción es pública; precios y costos, nunca
+  if (d) o.descripcion = d;
   if (p.updatedAt) o.actualizadoEn = Number(p.updatedAt);
   return o;
 }

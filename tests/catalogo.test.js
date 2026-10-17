@@ -72,7 +72,7 @@ test('reglas: el catálogo solo se lee si está activo y solo admite campos púb
   assert.match(r['.read'], /child\('activo'\)\.val\(\) === true/);
   assert.match(r['.write'], /'admin'/);
   const campos = Object.keys(r.productos.$code).filter(k => !k.startsWith('.') && k !== '$other').sort();
-  assert.deepEqual(campos, ['actualizadoEn', 'categoria', 'disponible', 'imagen', 'nombre']);
+  assert.deepEqual(campos, ['actualizadoEn', 'categoria', 'descripcion', 'disponible', 'imagen', 'nombre']);
   assert.equal(r.productos.$code.$other['.validate'], false);
 });
 
@@ -202,4 +202,13 @@ test('página pública: catálogo desactivado en la copia muestra "no disponible
   await new Promise(r => setTimeout(r, 100));
   assert.match(dom.window.document.getElementById('cpContenido').textContent, /no está disponible/);
   assert.equal(dom.window.firebase, undefined);
+});
+
+test('catálogo: la descripción del producto es pública (máx. 300 caracteres) y los precios y costos siguen fuera', () => {
+  const { window } = setup({});
+  const o = JSON.parse(JSON.stringify(window.productoPublico({ name: 'CAJON', desc: 'CAJON MIXTO ENLADRILLADO ATEMPO', stock: 2, price: 400, costoCompra: 280 })));
+  assert.equal(o.descripcion, 'CAJON MIXTO ENLADRILLADO ATEMPO');
+  assert.ok(!('price' in o) && !('costoCompra' in o) && !JSON.stringify(o).includes('280'));
+  assert.equal(window.productoPublico({ name: 'X', desc: 'a'.repeat(500) }).descripcion.length, 300);
+  assert.equal('descripcion' in window.productoPublico({ name: 'X' }), false);   // sin descripción no se escribe el campo
 });

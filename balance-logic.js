@@ -574,6 +574,7 @@ window.Compras = {
 
     // ── leer comprobante (XML / PDF / foto) → previsualización → rellena el formulario ──
     const aplicarBorrador = (b, guardar) => {
+      const marca = window.ComprasImport && ComprasImport.marcaComun ? ComprasImport.marcaComun((b.lineas || []).filter(l => l.code === '__nuevo__').map(l => l.desc)) : '';   // marca repetida al final de las descripciones nuevas
       if (b.almacen && $('cpAlm')) $('cpAlm').value = b.almacen;
       $('cpProv').value = b.proveedor; $('cpRuc').value = b.ruc; $('cpCompTipo').value = b.tipo;
       if (b.fecha) $('cpDate').value = b.fecha; $('cpSerie').value = (b.serie || '').toUpperCase(); $('cpNumero').value = b.numero;
@@ -581,7 +582,7 @@ window.Compras = {
       (b.lineas.length ? b.lineas : [{}]).forEach(l => {
         const tr = nuevaLinea(); if (!l.code) return;
         tr.querySelector('.ln-prod').value = l.code; tr.querySelector('.ln-qty').value = l.qty; tr.querySelector('.ln-price').value = l.precio;
-        if (l.code === NUEVO) { tr.querySelector('.nv-code').value = l.codigoNuevo || ''; { const nom = (window.ComprasImport && ComprasImport.nombreCorto ? ComprasImport.nombreCorto(l.desc) : l.desc) || ''; tr.querySelector('.nv-name').value = nom; tr.querySelector('.nv-desc').value = nom !== (l.desc || '') ? (l.desc || '') : ''; } tr.querySelector('.nv-tipo').value = l.tipoNuevo || (l.codigoNuevo ? 'importado' : 'nacional'); }
+        if (l.code === NUEVO) { tr.querySelector('.nv-code').value = l.codigoNuevo || ''; { const nom = (window.ComprasImport && ComprasImport.nombreCorto ? ComprasImport.nombreCorto(l.desc, marca) : l.desc) || ''; tr.querySelector('.nv-name').value = nom; tr.querySelector('.nv-desc').value = nom !== (l.desc || '') ? (l.desc || '') : ''; } tr.querySelector('.nv-tipo').value = l.tipoNuevo || (l.codigoNuevo ? 'importado' : 'nacional'); }
       });
       tipoComp();
       if (guardar === true) $('cpSave').click();   // «Aprobar y guardar compra» desde el modal

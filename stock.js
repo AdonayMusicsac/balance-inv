@@ -144,20 +144,24 @@ const STOCK_PAGE_SIZE = 20;
 let stockRenderLimit = STOCK_PAGE_SIZE;
 let stockScrollObserver = null;
 
+// Minúsculas, sin tildes ni signos raros: «Cajón» y «cajon» son lo mismo.
+function normalizarBusqueda(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\/.\-\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
 function getFilteredProducts() {
-  const q = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
+  const q = (document.getElementById('searchInput')?.value || '').trim();
   const origen = document.getElementById('origenFilter')?.value || '';
   const porOrigen = p => !origen || (origen === 'sin' ? !p.tipo : p.tipo === origen);
   const base = productosEnVista();
   if (!q) return origen ? base.filter(porOrigen) : base;
+  const palabras = normalizarBusqueda(q).split(' ').filter(Boolean);
   return base.filter(p => {
     if (!porOrigen(p)) return false;
-    // displayProductCode() vuelve a convertir "⁄" en "/" antes de
-    // comparar: si no, buscar "1/2" nunca encontraría un producto
-    // guardado internamente como "1⁄2" (el usuario nunca escribe
-    // "⁄", solo ve y escribe "/").
-    const search = `${displayProductCode(p.code || '')} ${p.name || ''} ${p.category || ''}`.toLowerCase();
-    return search.includes(q);
+    // displayProductCode() vuelve a convertir "⁄" en "/" antes de comparar: si no, buscar "1/2" nunca
+    // encontraría un producto guardado internamente como "1⁄2" (el usuario solo ve y escribe "/").
+    // Se busca en código, nombre, descripción y categoría; las palabras pueden ir en cualquier orden.
+    const texto = normalizarBusqueda(`${displayProductCode(p.code || '')} ${p.name || ''} ${p.desc || ''} ${p.category || ''}`);
+    return palabras.every(w => texto.includes(w));
   });
 }
 

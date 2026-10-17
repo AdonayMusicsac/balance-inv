@@ -22,7 +22,7 @@
      Página standalone (no pasa por router.js ni por el login): la abre
      cualquier cliente con el link que se genera en la pantalla Catálogo.
 
-     Muestra SOLO nombre, foto, categoría y si hay disponible — nunca
+     Muestra SOLO nombre, descripción, foto, categoría y si hay disponible — nunca
      precio, costo ni cantidades. No es una limitación de esta pantalla:
      el nodo catalogoPublico que lee ni siquiera TIENE esos campos (ver
      sincronizarCatalogoPublico() en catalogo-logic.js).
@@ -208,6 +208,7 @@
   .cp-share-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
   .cp-share-btn:hover { color: var(--text-1); }
   .cp-name { font-size: 13.5px; font-weight: 600; color: var(--text-1); line-height: 1.3; }
+  .cp-desc { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; color: var(--text-2, #666); line-height: 1.35; margin-top: 2px; }
   .cp-ask {
     margin-top: auto;
     display: inline-flex;
@@ -432,6 +433,7 @@ function pintarCatalogo(data) {
       cpProductos = Object.keys(productosObj).map(code => ({
         code,
         nombre: productosObj[code].nombre || '',
+        descripcion: productosObj[code].descripcion || '',
         categoria: productosObj[code].categoria || 'Sin categoría',
         imagen: productosObj[code].imagen || '',
         actualizadoEn: productosObj[code].actualizadoEn || 0,
@@ -564,7 +566,11 @@ function ordenarYFiltrar(lista) {
     const favoritos = leerFavoritosPublico();
     filtrado = filtrado.filter(p => favoritos.includes(p.code));
   }
-  if (q) filtrado = filtrado.filter(p => p.nombre.toLowerCase().includes(q));
+  if (q) {   // palabras en cualquier orden, sin tildes; busca en nombre, descripción y categoría
+    const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const palabras = norm(q).split(/\s+/).filter(Boolean);
+    filtrado = filtrado.filter(p => { const texto = norm(p.nombre + ' ' + (p.descripcion || '') + ' ' + p.categoria); return palabras.every(w => texto.includes(w)); });
+  }
 
   filtrado = [...filtrado];
   if (orden === 'nombre') {
@@ -663,6 +669,7 @@ function itemHtmlPublico(p, whatsapp) {
           ${compartirBtn}
         </div>
         <span class="cp-name">${escapeHtmlPublico(p.nombre)}</span>
+        ${p.descripcion ? `<span class="cp-desc">${escapeHtmlPublico(p.descripcion)}</span>` : ''}
         ${askBtn}
       </div>
     </div>`;

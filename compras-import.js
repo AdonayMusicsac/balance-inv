@@ -146,14 +146,25 @@
     return { codigo, desc, qty: mejor.q, precio: mejor.precio };
   }
 
-  // Nombre corto para Stock: lo que va antes de «CON …», «EN …» o una comilla; la descripción completa queda aparte.
-  function nombreCorto(desc) {
-    const d = String(desc || '').replace(/\s+/g, ' ').trim();
-    if (d.length <= 40) return d;
-    const corte = d.search(/\s(?:CON|CONTIENE|EN|INCLUYE)\s|\s["“(]/i);
-    if (corte >= 12) return d.slice(0, corte).trim();
-    return d.split(' ').slice(0, 5).join(' ');
+  // Marca que se repite al final de las descripciones de una misma factura («… ATEMPO»): sirve para sacarla del nombre y dejarla en la descripción.
+  function marcaComun(descripciones) {
+    const cuenta = {};
+    (descripciones || []).forEach(d => { const pal = String(d || '').trim().split(/\s+/); const u = pal.length > 1 ? pal[pal.length - 1].toUpperCase() : ''; if (u.length >= 3 && /[A-ZÁÉÍÓÚÑ]{3}/.test(u) && !/\d/.test(u)) cuenta[u] = (cuenta[u] || 0) + 1; });
+    const mejor = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
+    return mejor && mejor[1] >= 2 && mejor[1] >= Math.ceil((descripciones || []).length / 2) ? mejor[0] : '';
   }
+  // Nombre corto para Stock: sin la marca final y antes de «CON …», «EN …» o una comilla; la descripción completa de la factura queda aparte.
+  function nombreCorto(desc, marca) {
+    const d = String(desc || '').replace(/\s+/g, ' ').trim();
+    if (!d) return '';
+    let n = d;
+    if (marca) { const sin = n.replace(new RegExp('\\s+' + marca.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'), '').trim(); if (sin) n = sin; }
+    const corte = n.search(/\s(?:CON|CONTIENE|EN|INCLUYE)\s|\s["“(]/i);
+    if (corte >= 8) n = n.slice(0, corte).trim();
+    if (n.length > 40) n = n.split(' ').slice(0, 5).join(' ');
+    return n;
+  }
+
   // Líneas que NO pueden ser el nombre del proveedor (direcciones, teléfonos, datos del cliente, forma de pago, bancos, columnas…).
   const RUIDO_NOMBRE = /factura|boleta|cliente|se[ñn]or|adquirente|direcci|^dir\b|dir\.|local|\bjr\b|jr\.|\bav\b|av\.|\bpj\b|pj\.|\bpsj\b|\bmz\b|\blote\b|calle|\bcal\b|cal\.|urb\.|whatsapp|mensaje|precio|unitario|\bunit\b|dscto|desct|\bcant\b|\bitem\b|subtotal|\bigv\b|distrito|telf|tel[eé]f|tel:|@|www\.|\.com|\.pe\b|correo|e-mail|ruc|fecha|gu[ií]a|forma\s*(?:de\s*)?pago|cr[eé]dito|contado|condici|vendedor|moneda|o\/c|orden de|vencim|observ|banco|cuenta|bcp|bbva|interbank|total|monto|importe|valor|igv|descuento|cantidad|descripci|c[oó]digo|unidad|\bnro\b|n[°º]|p[aá]gina|representaci|sunat|electr[oó]nica/i;
   // Para nombres ya guardados solo se descartan los que claramente son una dirección o un dato suelto.
@@ -520,5 +531,5 @@
     q('ciGuardar').onclick = () => aprobar(true);      // rellena y guarda la compra
   }
 
-  window.ComprasImport = { rucValido, repararRuc, consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
+  window.ComprasImport = { marcaComun, rucValido, repararRuc, consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
 })();

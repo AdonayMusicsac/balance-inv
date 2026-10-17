@@ -234,3 +234,32 @@ test('Filas del PDF: un hueco mayor que media letra separa columnas aunque sea p
   const t = CI().filasDesdeItems([{ s: 'ATCMXENL', x: 200.5, y: 611, w: 29.7, h: 8 }, { s: 'CAJON MIXTO', x: 236.1, y: 611, w: 50, h: 8 }, { s: 'pegado', x: 287, y: 611, w: 20, h: 8 }]);
   assert.equal(t.trim(), 'ATCMXENL  CAJON MIXTO pegado');
 });
+
+test('Stock: la búsqueda encuentra por palabras en cualquier orden, sin tildes, y también en la descripción', async () => {
+  const { window, firebase } = loadApp(['tests/helpers/stub-auth.js', 'firebase.js', 'selection.js', 'balance-logic.js', 'compras-import.js', 'stock.js'], '<div id="viewRoot"></div>');
+  const fs = require('fs'), path = require('path'), d = window.document;
+  firebase._store.products = {
+    ATCMXENL: { name: 'CAJON MIXTO ENLADRILLADO', desc: 'CAJON MIXTO ENLADRILLADO ATEMPO', stock: 1, tipo: 'importado' },
+    ATPEDCAJ: { name: 'PEDAL DE CAJON', desc: 'PEDAL DE CAJON ATEMPO', stock: 1, tipo: 'importado' },
+    G1: { name: 'Guitarra clásica', stock: 3, tipo: 'nacional' } };
+  await new Promise(r => setTimeout(r, 150));
+  d.getElementById('viewRoot').innerHTML = fs.readFileSync(path.join(__dirname, '..', 'views', 'stock-view.html'), 'utf8');
+  await window.refreshProductsNow(); window.Stock.init(); await new Promise(r => setTimeout(r, 150));
+  const buscar = q => { d.getElementById('searchInput').value = q; return plain(window.getFilteredProducts().map(p => p.code).sort()); };
+  assert.deepEqual(buscar('cajon atempo mixto'), ['ATCMXENL']);          // otro orden, y «atempo» solo está en la descripción
+  assert.deepEqual(buscar('CAJÓN'), ['ATCMXENL', 'ATPEDCAJ']);           // con tilde y mayúsculas
+  assert.deepEqual(buscar('atempo'), ['ATCMXENL', 'ATPEDCAJ']);
+  assert.deepEqual(buscar('guitarra clasica'), ['G1']);
+  assert.deepEqual(buscar('atcmxenl'), ['ATCMXENL']);                     // por código
+  assert.deepEqual(buscar('cajon zzz'), []);
+});
+
+test('Compra: la marca que se repite al final sale del nombre y la descripción completa queda aparte', () => {
+  const c = CI();
+  const descs = ['CHIMES 64 BARRAS CON FUNDA ATEMPO', 'PANDERETA NEGRA CROM ATEMPO', 'CAJON MIXTO ENLADRILLADO ATEMPO', 'PEDAL DE CAJON ATEMPO'];
+  const marca = c.marcaComun(descs);
+  assert.equal(marca, 'ATEMPO');
+  assert.deepEqual(descs.map(x => c.nombreCorto(x, marca)), ['CHIMES 64 BARRAS', 'PANDERETA NEGRA CROM', 'CAJON MIXTO ENLADRILLADO', 'PEDAL DE CAJON']);
+  assert.equal(c.marcaComun(['UKULELE STRINBERG UK-06C', 'CABLE 6M']), '');   // sin marca repetida no se inventa una
+  assert.equal(c.nombreCorto('SOPORTE PARA SMARTPHONE HERCULES', ''), 'SOPORTE PARA SMARTPHONE HERCULES');
+});
