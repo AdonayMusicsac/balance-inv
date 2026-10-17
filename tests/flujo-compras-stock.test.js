@@ -216,3 +216,21 @@ test('Editar producto: costo de compra y precio de venta se guardan; el origen e
   window.openEditStock('E2', 'SIN ORIGEN', 1, 0, 'general', ''); window.saveStock(); await new Promise(r => setTimeout(r, 100));
   assert.match(aviso, /origen/i); assert.equal(firebase._store.products.E2.tipo, undefined);
 });
+
+// Factura real de A Tempo Internacional (texto extraído con pdf.js): código y descripción en celdas pegadas, códigos partidos en dos líneas,
+// columna ICBPER en 0.00 y «Valor Unitario» SIN IGV (no trae importe por fila).
+const FAC_ATEMPO = "FACTURA ELECTRONICA\nA TEMPO INTERNACIONAL S.A.C.\nRUC: 20547738111\nJR. LAS MERCEDES 934 URB. ZARATE\nE001-1751\nSAN JUAN DE LURIGANCHO - LIMA - LIMA\nFecha de Emisión  : 16/10/2026  Forma de pago : Contado\nSeñor(es)  : ADONAY MUSIC S.A.C.\nRUC  : 20616269659\nPJ. ENRIQUE MONTES 150 INT.\nDirección del Cliente  : 147 PLAZA DOS DE MAYO\nLIMA-LIMA-LIMA\nTipo de Moneda  : SOLES\nObservación  :\nValor\nCantidad Unidad Medida  Código  Descripción  ICBPER\nUnitario\n2.00  UNIDAD  ATCHM64  CHIMES 64 BARRAS CON FUNDA ATEMPO  237.29  0.00\n2.00  UNIDAD  ATPAND-  63.56  0.00\nPANDERETA NEGRA CROM ATEMPO\nNE-CR\n1.00  UNIDAD  ATCMXENL  CAJON MIXTO ENLADRILLADO  ATEMPO  338.98  0.00\n1.00  UNIDAD  ATCLAMP  SOSTENEDOR DE PANDERETA ATEMPO  29.66  0.00\n3.00  UNIDAD  FUCG  FUNDA CAJON GRANDE CON LOGO ATEMPO  42.37  0.00\n1.00  UNIDAD  ATPAND-  63.56  0.00\nPANDERETA ROJA CROM ATEMPO\nRO-CR\n1.00  UNIDAD  ATCAMPTR  CAMPANA DE TRINEO ATEMPO  118.65  0.00\n1.00  UNIDAD  ATPEDCAJ  PEDAL DE CAJON ATEMPO  330.51  0.00\nSub Total\n:  S/ 1,610.17\nVentas\nAnticipos :  S/ 0.00\nValor de Venta de\n: S/ 0.00  Descuentos :  S/ 0.00\nOperaciones Gratuitas\nValor Venta :  S/ 1,610.17\nISC :  S/ 0.00\nIGV :  S/ 289.83\nICBPER :  S/ 0.00\nSON: UN MIL NOVECIENTOS Y 00/100 SOLES\nOtros Cargos :  S/ 0.00\nOtros Tributos :  S/ 0.00\nMonto de\n:  S/ 0.00\nredondeo\nImporte Total :  S/ 1,900.00\nEsta es una representación impresa de la factura electrónica, generada en el Sistema de SUNAT. Puede verificarla utilizando su\nclave SOL.";
+
+test('Factura real A Tempo: 8 productos nuevos con código, descripción, cantidad y precio c/IGV (suma = importe total)', () => {
+  const r = plain(CI().parseTexto(FAC_ATEMPO, 'PDF'));
+  assert.deepEqual([r.proveedor, r.ruc, r.serie, r.numero, r.fecha, r.moneda], ['A TEMPO INTERNACIONAL S.A.C.', '20547738111', 'E001', '1751', '2026-10-16', 'PEN']);
+  assert.deepEqual(r.lineas.map(l => [l.codigo, l.qty, l.precio]), [
+    ['ATCHM64', 2, 280], ['ATPANDNE-CR', 2, 75], ['ATCMXENL', 1, 400], ['ATCLAMP', 1, 35], ['FUCG', 3, 50], ['ATPANDRO-CR', 1, 75], ['ATCAMPTR', 1, 140], ['ATPEDCAJ', 1, 390]]);
+  assert.equal(r.lineas[1].desc, 'PANDERETA NEGRA CROM ATEMPO');
+  assert.equal(Math.round(r.lineas.reduce((a, l) => a + l.qty * l.precio, 0) * 100) / 100, 1900);
+});
+
+test('Filas del PDF: un hueco mayor que media letra separa columnas aunque sea pequeño (código y descripción)', () => {
+  const t = CI().filasDesdeItems([{ s: 'ATCMXENL', x: 200.5, y: 611, w: 29.7, h: 8 }, { s: 'CAJON MIXTO', x: 236.1, y: 611, w: 50, h: 8 }, { s: 'pegado', x: 287, y: 611, w: 20, h: 8 }]);
+  assert.equal(t.trim(), 'ATCMXENL  CAJON MIXTO pegado');
+});

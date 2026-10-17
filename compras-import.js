@@ -43,8 +43,10 @@
   // Convierte una fila de texto en una lista de piezas (número, código, descuento, unidad o texto), separando lo que el PDF dejó pegado.
   function tokenizar(raw) {
     let toks = raw.split(/\s{2,}/).map(x => x.trim()).filter(Boolean);
-    if (toks.length < 4) toks = raw.split(/\s+/).filter(Boolean);
+    let porPalabras = false;
+    if (toks.length < 4) { toks = raw.split(/\s+/).filter(Boolean); porPalabras = true; }   // sin columnas separadas (p. ej. OCR): cada palabra es una pieza
     const seq = [];
+    seq.porPalabras = false;
     const push = (txt, pegado) => {
       const tipo = /^0\d{2,}$/.test(txt) || /^\d{5,}$/.test(txt) ? 'cod' : esNum(txt) ? 'num' : DSC.test(txt) ? 'dsc' : UNIDAD.test(txt) || MONEDA_TOK.test(txt) ? 'uni' : 'txt';
       seq.push({ txt, tipo, pegado: !!pegado, val: tipo === 'num' ? num(txt) : 0 });
@@ -60,11 +62,12 @@
       if (mt && !esNum(t)) { push(mt[1]); mt[2].split(/\s+/).forEach(w => push(w, true)); return; }
       push(t);
     });
+    seq.porPalabras = porPalabras;
     return seq;
   }
   // Arma código y descripción con las piezas que no se usaron como cantidad o precio.
   // Un número que queda DENTRO de la descripción («CABLE 3 M», «TECLADO 61 TECLAS») vuelve a ella; las columnas de descuento (número · «10-6» · número) no.
-  function armarTexto(seq, usados) {
+  function armarTexto(seq, usados, colCodigo) {
     const iTxt = seq.map((e, i) => e.tipo === 'txt' && !usados.has(i) ? i : -1).filter(i => i >= 0);
     const ini = iTxt.length ? iTxt[0] : -1, fin = iTxt.length ? iTxt[iTxt.length - 1] : -1;
     const textos = [], extras = [];
@@ -77,15 +80,21 @@
       else if (e.tipo === 'cod' && !dentro) extras.push(e.txt);
       else if (e.tipo === 'cod' || e.tipo === 'num' || e.tipo === 'dsc') { if (dentro && !esColumnaDsc) textos.push(e.txt); else if (e.tipo === 'num' && e.pegado) textos.push(e.txt); }
     });
+    const conCol = colCodigo && !seq.porPalabras;   // la columna «Código» solo sirve si el texto conserva las columnas
+    const pareceCodigo = w => w.length <= 25 && !/\s/.test(w) && (/[\d-]/.test(w) || (conCol && /^[A-Z0-9._\/-]{2,25}$/.test(w)));   // con columna «Código» en la tabla, una palabra en mayúsculas ya es un código
     let codigo = '', desc = textos;
-    if (textos.length >= 2 && /[\d-]/.test(textos[0]) && textos[0].length <= 25 && !/\s/.test(textos[0])) { codigo = textos[0]; desc = textos.slice(1); }
+    if (textos.length >= 2 && pareceCodigo(textos[0])) { codigo = textos[0]; desc = textos.slice(1); }
+    else if (conCol && textos.length === 1) {
+      const pal = textos[0].split(/\s+/);
+      if (pal.length === 1 && /^[A-Z0-9][A-Z0-9._\/]*-$/i.test(pal[0])) { codigo = pal[0]; desc = []; }                    // «ATPAND-»: el código se partió en dos líneas
+    }
     if (!codigo) codigo = extras[0] || '';
     return { codigo, desc: desc.join(' ').replace(/\s{2,}/g, ' ').trim() };
   }
 
   // Busca cantidad × precio = importe entre los números de una línea, sin importar el orden de las columnas.
   // También entiende: precio sin IGV junto a su importe con IGV, y columnas de descuento (% o precio con descuento).
-  function lineaProducto(raw, precioPrimero) {
+  function lineaProducto(raw, precioPrimero, colCodigo) {
     const seq = tokenizar(raw);
     if (seq.length < 3 || seq.length > 60) return null;
     const idx = seq.map((e, i) => e.tipo === 'num' ? i : -1).filter(i => i >= 0), nums = idx.map(i => seq[i].val);
@@ -131,7 +140,7 @@
       if (j >= 0) { mejor.precio = r2(nums[j] / mejor.q); mejor.usa.push(j); }
     }
     const usados = new Set(mejor.usa.map(k => idx[k]));
-    const { codigo, desc } = armarTexto(seq, usados);
+    const { codigo, desc } = armarTexto(seq, usados, colCodigo);
     if (!desc && !codigo) return null;
     if (NO_PRODUCTO.test(desc)) return null;
     return { codigo, desc, qty: mejor.q, precio: mejor.precio };
@@ -150,9 +159,9 @@
   // Para nombres ya guardados solo se descartan los que claramente son una dirección o un dato suelto.
   const parecedireccion = x => /dir\.|direcci|local:|\bjr\b|jr\.|\bav\.|\bcalle\b|urb\.|telf|@|www\.|\.com|forma\s*pago|cr[eé]dito\s*\d/i.test(String(x || ''));
   // Filas con solo cantidad y precio unitario (sin columna de importe): se usan únicamente si no se pudo leer ninguna fila completa.
-  function lineaSimple(raw) {
+  function lineaSimple(raw, colCodigo) {
     const seq = tokenizar(raw);
-    const idx = seq.map((e, i) => e.tipo === 'num' ? i : -1).filter(i => i >= 0);
+    const idx = seq.map((e, i) => e.tipo === 'num' && e.val > 0 ? i : -1).filter(i => i >= 0);   // las cifras en 0.00 (ICBPER, descuento) no cuentan
     const iTx = seq.map((e, i) => e.tipo === 'txt' ? i : -1).filter(i => i >= 0);
     if (idx.length < 2 || !iTx.length) return null;
     // cantidad = primer número, precio = último; los de en medio solo valen si están dentro de la descripción («… 0.73 X12»)
@@ -160,9 +169,11 @@
     if (medios.some(i => !(i > iTx[0] && i < iTx[iTx.length - 1]))) return null;
     const q = seq[idx[0]].val, p = seq[idx[idx.length - 1]].val;
     if (!(q > 0) || q > 100000 || !(p > 0)) return null;
-    const { codigo, desc } = armarTexto(seq, new Set([idx[0], idx[idx.length - 1]]));
+    const { codigo, desc } = armarTexto(seq, new Set([idx[0], idx[idx.length - 1]]), colCodigo);
     return (desc || codigo) && !NO_PRODUCTO.test(desc) ? { codigo, desc, qty: q, precio: p } : null;
   }
+  // Un precio sin IGV pasado a «con IGV»: los precios de venta suelen ser redondos, así que se elige el más redondo dentro del error de redondeo de la factura (118.65 × 1,18 → 140, no 140.01).
+  const conIgvRedondo = x => { for (const paso of [1, 0.5, 0.1]) { const c = Math.round(x / paso) * paso; if (Math.abs(c - x) <= 0.0105) return r2(c); } return r2(x); };
   // Dígito verificador del RUC (módulo 11): detecta cifras mal leídas por el OCR.
   function rucValido(r) {
     if (!/^\d{11}$/.test(String(r || ''))) return false;
@@ -227,38 +238,46 @@
       fecha = f1 ? f1[0] : f2 ? `${f2[3]}-${pad2(f2[2])}-${pad2(f2[1])}` : '';
       if (!fecha && f3 && MESES[f3[2].toLowerCase()]) fecha = `${f3[3]}-${pad2(MESES[f3[2].toLowerCase()])}-${pad2(f3[1])}`;
     }
-    const lineas = []; let ultima = null, cont = 0;
+    const lineas = []; let ultima = null;
     const todas = t.split('\n').map(x => x.trim());
     const iHead0 = todas.findIndex(x => /\b(?:cant|cantidad|qty)\b/i.test(x) && /descripci|detalle|producto|description|c[oó]digo|code|item/i.test(x));
     const cab = iHead0 >= 0 ? todas[iHead0] + ' ' + (todas[iHead0 + 1] || '') : '';
     const posCant = cab.search(/\b(?:cant|cantidad|qty)\b/i), posPrecio = cab.search(/\bp\.?\s?u(?:nit)?\b|precio|valor\s+unit|\bunit/i);
     const precioPrimero = posCant >= 0 && posPrecio >= 0 ? posPrecio < posCant : null;   // ¿la columna de precio va antes que la de cantidad?
     const iFin0 = iHead0 >= 0 ? todas.findIndex((x, i) => i > iHead0 && /^(?:sub\s*total|total\b|op\.?\s*gravada|valor\s+(?:de\s+)?venta|importe\s+total|son:|gravada\b)/i.test(x)) : -1;
+    const colCodigo = /c[oó]d(?:igo|\.)?\b|\bcode\b|\bsku\b/i.test(cab);
+    // Filas que continúan al producto anterior: el resto del código partido («NE-CR») o la descripción larga en otra línea.
+    const continuar = (u, l) => {
+      if (/^[A-Z0-9][A-Z0-9._\/-]{1,14}$/i.test(l) && /-$/.test(u.codigo || '') && (u._c || 0) < 3) { u.codigo = u.codigo.slice(0, -1) + l; u._c = (u._c || 0) + 1; return true; }
+      if ((u._c || 0) < 2 && l.length >= 3 && l.length <= 90 && /[A-Za-zÁÉÍÓÚ]{3}/.test(l) && !STOP.test(l) && !/\d+[.,]\d{2}\b/.test(l) && !/\b[FEBfeb][A-Za-z0-9]{3}\s*-\s*\d/.test(l)) { u.desc = (u.desc + ' ' + l.replace(/\s{2,}/g, ' ')).trim(); u._c = (u._c || 0) + 1; return true; }
+      return false;
+    };
     t.split('\n').forEach((raw, ri) => {
       const l = raw.trim();
       const enTabla = iHead0 < 0 || (ri > iHead0 && (iFin0 < 0 || ri < iFin0));   // con cabecera de tabla, solo cuentan las filas entre ella y los totales
-      const it = l && enTabla ? lineaProducto(l, precioPrimero) : null;
-      if (it) { lineas.push(it); ultima = it; cont = 0; return; }
-      // Descripción larga que continúa en la fila de abajo (sin números de cantidad/precio).
-      if (enTabla && ultima && cont < 2 && l.length >= 3 && l.length <= 90 && /[A-Za-zÁÉÍÓÚ]{3}/.test(l) && !STOP.test(l) && !/\d+[.,]\d{2}\b/.test(l) && !/\b[FEBfeb][A-Za-z0-9]{3}\s*-\s*\d/.test(l)) { ultima.desc = (ultima.desc + ' ' + l.replace(/\s{2,}/g, ' ')).trim(); cont++; }
-      else ultima = null;
+      const it = l && enTabla ? lineaProducto(l, precioPrimero, colCodigo) : null;
+      if (it) { lineas.push(it); ultima = it; return; }
+      if (!(enTabla && ultima && l && continuar(ultima, l))) ultima = null;
     });
     // Segunda pasada: facturas que traen solo cantidad y precio unitario (sin importe). Se leen entre la cabecera de la tabla y los totales.
     if (!lineas.length) {
       const rows = t.split('\n').map(x => x.trim()).filter(Boolean);
       const iHead = rows.findIndex(x => /cant/i.test(x) && /descripci|detalle|producto/i.test(x));
       if (iHead >= 0) {
+        let ult2 = null;
         for (let k = iHead + 1; k < rows.length; k++) {
           if (/sub\s*total|valor\s+(?:de\s+)?venta|gravada|^son:|importe\s+total|^total/i.test(rows[k])) break;
-          const it = lineaSimple(rows[k]); if (it) lineas.push(it);
+          const it = lineaSimple(rows[k], colCodigo);
+          if (it) { lineas.push(it); ult2 = it; } else if (!(ult2 && continuar(ult2, rows[k]))) ult2 = null;
         }
         // ¿Los precios vienen sin IGV? Se compara la suma cantidad × precio con «Valor de venta» (sin IGV) y con el total (con IGV).
         const valNum = re => { const mm = t.match(re); return mm ? num(mm[1]) : 0; };
         const vVenta = valNum(/(?:sub\s*total\s+ventas|valor\s+(?:de\s+)?venta|gravada)[^\d\n]*([\d.,]+)/i), vTotal = valNum(/^(?:importe\s+total|precio\s+de\s+venta|total(?:\s+general)?)\b[^\d\n]*([\d.,]+)/im);
         const suma = lineas.reduce((a, l) => a + l.qty * l.precio, 0), cerca = (x, y) => y > 0 && Math.abs(x - y) <= Math.max(0.5, 0.005 * y);
-        if (lineas.length && cerca(suma, vVenta) && !cerca(suma, vTotal)) lineas.forEach(l => { l.precio = r2(l.precio * IGV); });
+        if (lineas.length && cerca(suma, vVenta) && !cerca(suma, vTotal)) lineas.forEach(l => { l.precio = conIgvRedondo(l.precio * IGV); });
       }
     }
+    lineas.forEach(l => { delete l._c; });
     const filas = filas0;
     const crudas = t.split('\n').map(x => x.trim()).filter(Boolean);   // con los espacios dobles que separan columnas
     const SUFIJO = /\b(S\.?A\.?C|S\.?R\.?L|E\.?I\.?R\.?L|S\.?A\.?A|S\.?A)\b\.?/i;
@@ -313,7 +332,7 @@
     return filas.sort((a, b) => b.y - a.y).map(f => {
       f.items.sort((a, b) => a.x - b.x);
       let linea = '', fin = null;
-      f.items.forEach(it => { if (fin !== null) { const gap = it.x - fin; linea += gap > 8 ? '  ' : gap > 1 ? ' ' : ''; } linea += it.s.trim(); fin = it.x + (it.w || 0); });
+      f.items.forEach(it => { if (fin !== null) { const gap = it.x - fin, celda = Math.max(4, 0.5 * (it.h || 8)); linea += gap > celda ? '  ' : gap > 0.5 ? ' ' : ''; } linea += it.s.trim(); fin = it.x + (it.w || 0); });   // un hueco mayor que media letra separa columnas
       return linea;
     }).join('\n') + '\n';
   }
@@ -331,7 +350,7 @@
     for (let i = 1; i <= Math.min(pdf.numPages, 8); i++) {
       const pg = await pdf.getPage(i), c = await pg.getTextContent();
       if (i === 1) pg1 = pg;
-      out += filasDesdeItems(c.items.map(it => ({ s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0 })));
+      out += filasDesdeItems(c.items.map(it => ({ s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0, h: it.height || 8 })));
       if (i === 1 && out.trim().length < 30) { const vp = pg.getViewport({ scale: 2 }); lienzo = document.createElement('canvas'); lienzo.width = vp.width; lienzo.height = vp.height; await pg.render({ canvasContext: lienzo.getContext('2d'), viewport: vp }).promise; }
     }
     if (lienzo) return { texto: await ocr(lienzo), ocr: true };   // PDF escaneado: sin texto, se lee como foto
@@ -441,7 +460,7 @@
       <div class="ci-grid">
         <label class="ci-f ci-f-prod"><span>Producto</span><select class="ci-prod">${opts(sugerirProducto(l, prods) || (l.desc || l.codigo ? '__nuevo__' : ''))}</select></label>
         <label class="ci-f ci-nuevo"><span>Código</span><input class="ci-cod" placeholder="Automático si va vacío" value="${esc(l.codigo || '')}"></label>
-        <label class="ci-f ci-nuevo"><span>Origen</span><select class="ci-tipo"><option value="importado"${l.codigo ? ' selected' : ''}>Importado</option><option value="nacional"${l.codigo ? '' : ' selected'}>Nacional</option></select></label>
+        <label class="ci-f ci-nuevo"><span>Origen</span><select class="ci-tipo"><option value="importado" selected>Importado</option><option value="nacional">Nacional</option></select></label>
         <label class="ci-f"><span>Cantidad</span><input class="ci-qty" type="number" min="1" value="${l.qty || 1}"></label>
         <label class="ci-f"><span>Precio c/IGV</span><input class="ci-price" type="number" min="0" step="0.01" value="${l.precio || 0}"></label>
         <div class="ci-f"><span>Importe</span><b class="ci-imp">S/ 0.00</b></div>

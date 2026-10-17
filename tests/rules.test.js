@@ -111,3 +111,14 @@ test('las consultas de la app tienen índice (sin avisos de rendimiento)', () =>
   assert.ok(rules.compras['.indexOn'].includes('code') && rules.compras['.indexOn'].includes('facturaKey'));
   assert.ok(rules.movimientos['.indexOn'].includes('origenId') && rules.movimientos['.indexOn'].includes('code'));
 });
+
+test('meta/rucApi (token de consulta RUC): solo el administrador lo lee o escribe; meta/seeded sigue abierto a usuarios activos', () => {
+  const DBm = { users: { A: { rol: 'admin', activo: true }, V: { rol: 'vendedor', activo: true }, X: { rol: 'vendedor', activo: false } } };
+  assert.ok(can('read', { path: 'meta/rucApi', db: DBm, auth: ADMIN }), 'admin lee el token');
+  assert.ok(can('write', { path: 'meta/rucApi', db: DBm, auth: ADMIN, value: { token: 't' } }), 'admin guarda el token');
+  assert.ok(!can('read', { path: 'meta/rucApi', db: DBm, auth: VEND }), 'el vendedor NO lee el token');
+  assert.ok(!can('write', { path: 'meta/rucApi', db: DBm, auth: VEND, value: { token: 'x' } }), 'el vendedor NO cambia el token');
+  assert.ok(!can('read', { path: 'meta/rucApi', db: DBm, auth: OFF }) && !can('read', { path: 'meta/rucApi', db: DBm, auth: null }));
+  assert.ok(can('read', { path: 'meta/seeded', db: DBm, auth: VEND }) && can('write', { path: 'meta/seeded', db: DBm, auth: VEND, value: true }));
+  assert.ok(!can('read', { path: 'meta', db: DBm, auth: VEND }), 'no se puede leer todo meta de golpe');
+});

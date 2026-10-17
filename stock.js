@@ -8,6 +8,7 @@ const _verCosto = () => typeof isAdmin === 'function' && isAdmin();
 const costoDe = p => Number(p.costoCompra) > 0 ? Number(p.costoCompra) : (costosCache && costosCache[p.code] && costosCache[p.code].q ? costosCache[p.code].prom : 0);
 function cargarCostosStock() {   // solo admin: completa el costo de productos viejos (compras anteriores a que el costo se guardara en el producto)
   if (!_verCosto() || typeof costosPorProducto !== 'function') return;
+  if (!productsCache.some(p => !(Number(p.costoCompra) > 0) && (Number(p.stock) || 0) > 0)) return;   // todos ya tienen costo: no hace falta leer todas las compras
   costosPorProducto().then(c => {
     costosCache = c;
     productsCache.forEach(p => { if (!(Number(p.costoCompra) > 0) && c[p.code] && c[p.code].q) refProducts.child(p.code).update({ costoCompra: Math.round(c[p.code].prom * 10000) / 10000, costoUltimo: Math.round(c[p.code].ultimo * 10000) / 10000, updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {}); });
