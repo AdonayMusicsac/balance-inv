@@ -67,6 +67,7 @@ const _provKey = (ruc, nombre) => (String(ruc || '').trim() || String(nombre || 
 // Comprobante normalizado: serie en mayúsculas sin espacios; número sin espacios ni ceros a la izquierda.
 const _numComprobante = (serie, numero) => [String(serie || '').trim().toUpperCase(), String(numero || '').trim().replace(/^0+(?=\d)/, '')].filter(Boolean).join('-');
 // Igual que el Excel: Total = cant × precio; Base = ROUND(total / 1.18, 2); IGV = Total − Base.
+const r4 = n => Math.round((n + Number.EPSILON) * 10000) / 10000;
 const calcularImportes = window.calcularImportes = (qty, precio) => { const total = _r2(qty * precio), base = _r2(total / IGV); return { total, base, igv: _r2(total - base) }; };
 
 async function registrarCompra(c) {
@@ -90,13 +91,17 @@ async function registrarCompra(c) {
   const costoTotal = _r2(baseUnit * tc * c.qty + gastos), costoUnit = Math.round((costoTotal / c.qty + Number.EPSILON) * 10000) / 10000;   // 4 decimales + total: sin perder céntimos en lotes grandes
   const facturaKey = c.docTipo && c.docNum ? `${provKey}|${c.docTipo}|${c.docNum}` : '';
   const almacen = _almValido(c.almacen);
+  const costoPrevio = Number(_val(await refProducts.child(c.code).get()).costoCompra) || 0;
   const saldo = await moverStock(c.code, c.qty, almacen);
   const ref = refCompras.push();
   try {   // si algo falla después de mover el stock, se revierte todo
-    await refProducts.child(c.code).update({ tipo: c.tipo || 'nacional', ...(c.stockMin >= 0 ? { stockMin: c.stockMin } : {}) });
+    // Costo de compra del producto = lo que se pagó CON IGV, en promedio ponderado con lo que ya había en stock (lo ven todos los usuarios).
+    const unitPagado = (imp.total + gastos) / c.qty, stockPrevio = saldo - c.qty;
+    const costoCompra = r4(costoPrevio > 0 && stockPrevio > 0 ? (stockPrevio * costoPrevio + c.qty * unitPagado) / saldo : unitPagado);
+    await refProducts.child(c.code).update({ tipo: c.tipo || 'nacional', ...(c.stockMin >= 0 ? { stockMin: c.stockMin } : {}), costoCompra, costoUltimo: r4(unitPagado), updatedAt: firebase.database.ServerValue.TIMESTAMP });
     await refProveedores.child(provKey).update({ nombre: c.proveedor, ruc: c.ruc || '' });
     await ref.set({ code: c.code, nombre: c.nombre, proveedorId: provKey, proveedor: c.proveedor, ruc: c.ruc || '', cantidad: c.qty, precio: c.precio || 0, moneda: c.moneda || 'PEN',
-      unidad: c.unidad || '', base: imp.base, igv: imp.igv, total: imp.total, pago: c.pago || '', nOperacion: c.nOperacion || '', estadoPago: c.estadoPago || '', observ: c.observ || '',
+      unidad: c.unidad || '', base: imp.base, igv: imp.igv, total: imp.total, gastos, pago: c.pago || '', nOperacion: c.nOperacion || '', estadoPago: c.estadoPago || '', observ: c.observ || '',
       facturaId: c.facturaId || '', facturaKey, fecha: c.fecha, documento: doc, almacen, timestamp: Date.now() });
     await refCostos.child(ref.key).set({ code: c.code, costoUnit, costoTotal, moneda: c.moneda || 'PEN', tc, gastos, cantidad: c.qty, timestamp: Date.now() });
     await pushMov({ code: c.code, nombre: c.nombre, tipo: 'compra', cantidad: c.qty, saldoResultante: saldo, origenTipo: 'compra', origenId: ref.key, almacen });
@@ -205,10 +210,21 @@ async function _revertirCompra(id) {
   try {
     const saldo = await moverStock(c.code, -c.cantidad, c.almacen);
     await pushMov({ code: c.code, nombre: c.nombre, tipo: 'anulacion_compra', cantidad: -c.cantidad, saldoResultante: saldo, origenTipo: 'compra', origenId: id, ...(c.almacen ? { almacen: c.almacen } : {}) });
+    await _recalcularCostoProducto(c.code);
   } catch (e) {
     await refCompras.child(id).child('anulada').remove().catch(() => {});
     throw new Error(/insuficiente/.test(e.message) ? 'No se puede anular: parte de esa mercadería ya se vendió.' : e.message);
   }
+}
+// Costo de compra de un producto a partir de sus compras vigentes (promedio ponderado, con IGV). Si ya no quedan compras, se deja como está.
+async function _recalcularCostoProducto(code) {
+  try {
+    const cs = Object.values(_val(await refCompras.orderByChild('code').equalTo(code).get())).filter(x => !x.anulada && x.cantidad > 0);
+    if (!cs.length) return;
+    const q = cs.reduce((a, x) => a + x.cantidad, 0), t = cs.reduce((a, x) => a + (x.total || 0) + (x.gastos > 0 ? x.gastos : 0), 0);
+    const ult = cs.slice().sort((x, y) => (x.timestamp || 0) - (y.timestamp || 0)).pop();
+    await refProducts.child(code).update({ costoCompra: r4(t / q), costoUltimo: r4(((ult.total || 0) + (ult.gastos > 0 ? ult.gastos : 0)) / ult.cantidad), updatedAt: firebase.database.ServerValue.TIMESTAMP });
+  } catch (e) { /* el costo se corrige solo con la siguiente compra */ }
 }
 async function anularCompra(id) { _soloAdmin(); return _revertirCompra(id); }
 // Quita del historial una compra YA anulada (su stock ya fue revertido). El kardex conserva los movimientos.
@@ -419,13 +435,16 @@ async function calcularBalanceFacturable(opts) {
 }
 
 
-// Costo de compra por producto (solo admin lo puede leer): promedio ponderado y último costo, ignorando compras anuladas.
+// Costo de compra por producto (solo admin lo puede leer): lo que realmente se pagó, CON IGV (total de la compra ÷ cantidad), promedio ponderado y último,
+// ignorando compras anuladas. (El costo sin IGV que usa el balance contable queda aparte, en /costos.)
 async function costosPorProducto() {
   const [costos, compras] = await Promise.all([refCostos.get().then(_val), refCompras.get().then(_val)]);
   const out = {};
   Object.entries(costos).filter(([id]) => compras[id] && !compras[id].anulada).sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0)).forEach(([id, k]) => {
+    const c = compras[id], cant = k.cantidad || c.cantidad || 0;
+    const pagado = _r2((c.total != null ? c.total : (k.costoTotal != null ? k.costoTotal : k.costoUnit * cant) * IGV) + (k.gastos > 0 ? k.gastos : 0));
     const o = out[k.code] = out[k.code] || { t: 0, q: 0, ultimo: 0, fecha: '' };
-    o.t += k.costoTotal != null ? k.costoTotal : k.costoUnit * k.cantidad; o.q += k.cantidad; o.ultimo = k.costoUnit; o.fecha = compras[id].fecha || '';
+    o.t += pagado; o.q += cant; o.ultimo = cant ? pagado / cant : 0; o.fecha = c.fecha || '';
   });
   Object.values(out).forEach(o => { o.prom = o.q ? o.t / o.q : 0; });
   return out;

@@ -5,15 +5,21 @@
 let productsCache = [];
 let costosCache = null;   // {code: {prom, ultimo}} — solo admin
 const _verCosto = () => typeof isAdmin === 'function' && isAdmin();
-function cargarCostosStock() {
+const costoDe = p => Number(p.costoCompra) > 0 ? Number(p.costoCompra) : (costosCache && costosCache[p.code] && costosCache[p.code].q ? costosCache[p.code].prom : 0);
+function cargarCostosStock() {   // solo admin: completa el costo de productos viejos (compras anteriores a que el costo se guardara en el producto)
   if (!_verCosto() || typeof costosPorProducto !== 'function') return;
-  costosPorProducto().then(c => { costosCache = c; renderStockPage(); updateStats(); }).catch(() => {});
+  costosPorProducto().then(c => {
+    costosCache = c;
+    productsCache.forEach(p => { if (!(Number(p.costoCompra) > 0) && c[p.code] && c[p.code].q) refProducts.child(p.code).update({ costoCompra: Math.round(c[p.code].prom * 10000) / 10000, costoUltimo: Math.round(c[p.code].ultimo * 10000) / 10000, updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(() => {}); });
+    renderStockPage(); updateStats();
+  }).catch(() => {});
 }
 function costoHtml(p) {
-  const c = costosCache && costosCache[p.code];
-  if (!c || !c.q) return '<span class="pt-desc-empty">—</span>';
-  const pr = Number(p.price) || 0, mg = pr > 0 ? ` · margen ${Math.round((pr - c.prom) / pr * 100)}%` : '';
-  return `<span title="Último: S/ ${c.ultimo.toFixed(2)}${c.fecha ? ' (' + c.fecha + ')' : ''}">S/ ${c.prom.toFixed(2)}</span><small style="display:block;color:var(--text-3)">${mg.replace(' · ', '')}</small>`;
+  const cu = costoDe(p);
+  if (!cu) return '<span class="pt-desc-empty">—</span>';
+  const pr = Number(p.price) || 0, mg = pr > 0 ? `margen ${Math.round((pr - cu) / pr * 100)}%` : '';
+  const ult = Number(p.costoUltimo) > 0 ? `Último: S/ ${Number(p.costoUltimo).toFixed(2)}` : '';
+  return `<span title="${ult}">S/ ${cu.toFixed(2)}</span><small style="display:block;color:${pr > 0 && cu > pr ? '#c62828' : 'var(--text-3)'}">${mg}</small>`;
 }
 
 
@@ -221,7 +227,7 @@ function productCardHtml(p) {
           <span class="pc-lbl">Precio:</span>
           <span class="pc-price">${precioHtml(price)}</span>
         </div>
-        ${(costosCache && costosCache[p.code]) ? `<div class="pc-bot-item"><span class="pc-lbl">Costo:</span><span class="pc-price">S/ ${costosCache[p.code].prom.toFixed(2)}</span></div>` : ''}
+        ${costoDe(p) ? `<div class="pc-bot-item"><span class="pc-lbl">Costo:</span><span class="pc-price">S/ ${costoDe(p).toFixed(2)}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -357,14 +363,14 @@ function updateStats() {
   const total = base.length;
   const low   = base.filter(p => getDisplayStock(p) <= 6).length;
   // Valor del inventario = lo que costó (costo de compra promedio × cantidad). Solo el admin conoce los costos.
-  const conCosto = p => costosCache && costosCache[p.code] && costosCache[p.code].q;
-  const value = base.reduce((sum, p) => sum + (conCosto(p) ? costosCache[p.code].prom * getDisplayStock(p) : 0), 0);
+  const conCosto = p => costoDe(p) > 0;
+  const value = base.reduce((sum, p) => sum + costoDe(p) * getDisplayStock(p), 0);
   const sinCosto = base.filter(p => getDisplayStock(p) > 0 && !conCosto(p)).length;
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statLow').textContent   = low;
   const sv = document.getElementById('statValue');
-  sv.textContent = costosCache ? `S/ ${value.toLocaleString('es-PE', { maximumFractionDigits: 2 })}` : '—';
-  sv.title = costosCache && sinCosto ? `${sinCosto} producto(s) con stock no tienen costo de compra registrado y no suman.` : '';
+  sv.textContent = `S/ ${value.toLocaleString('es-PE', { maximumFractionDigits: 2 })}`;
+  sv.title = sinCosto ? `${sinCosto} producto(s) con stock no tienen costo de compra registrado y no suman.` : '';
 }
 
 /* ── Firebase listener ── */
@@ -403,6 +409,7 @@ function outsideClose(e, id) {
 
 /* ── Editar ── */
 let editingCode = '';
+let editingCostoOriginal = 0;
 
 function openEditStock(code, name, stock, price, cat, desc) {
   editingCode = code; // clave real de Firebase (con "⁄" si el código lleva "/")
@@ -421,6 +428,9 @@ function openEditStock(code, name, stock, price, cat, desc) {
   const prod = productsCache.find(p => p.code === code) || {};
   const tipoEl = document.getElementById('editTipo');
   if (tipoEl) tipoEl.value = prod.tipo || '';
+  editingCostoOriginal = Math.round((costoDe(prod) || 0) * 100) / 100;
+  const costEl = document.getElementById('editCost');
+  if (costEl) costEl.value = editingCostoOriginal || '';
   openModal('editModal');
 }
 
@@ -436,8 +446,13 @@ function saveStock() {
   const newCode = normalizeProductCode(document.getElementById('editCode').value);
   const tipoSel = (document.getElementById('editTipo') || {}).value || '';
 
+  const costEl = document.getElementById('editCost');
+  const costo = costEl ? parseFloat(costEl.value) : NaN;
+  const costoCambio = costEl && costEl.value !== '' && !isNaN(costo) && costo >= 0 && Math.round(costo * 100) / 100 !== editingCostoOriginal;
+
   if (!name) return alert('El nombre no puede estar vacío.');
   if (!newCode) return alert('El código no puede estar vacío.');
+  if (!tipoSel) return alert('Elige el origen: Nacional o Importado.');
 
   const codeChanged = newCode !== editingCode;
   if (codeChanged && productsCache.some(p => p.code === newCode)) {
@@ -453,7 +468,8 @@ function saveStock() {
     price,
     stock,
     category: existing.category || 'general',
-    ...(tipoSel ? { tipo: tipoSel } : {})
+    tipo: tipoSel,
+    ...(costoCambio ? { costoCompra: Math.round(costo * 10000) / 10000 } : {})
   }, existing.stock);
 
   const chain = codeChanged
@@ -868,7 +884,7 @@ window.Stock = {
     switchWarehouse('');
     applyStockRoleRestrictions();
     if (!document.getElementById('stockCostStyle')) { const st = document.createElement('style'); st.id = 'stockCostStyle'; document.head.appendChild(st); }
-    document.getElementById('stockCostStyle').textContent = _verCosto() ? '' : '.product-table .col-cost, .product-table .pt-cost { display: none !important; }';
+    document.getElementById('stockCostStyle').textContent = '';   // el costo de compra lo ven todos los usuarios
     cargarCostosStock();
   }
 };

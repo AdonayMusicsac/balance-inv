@@ -112,7 +112,7 @@
             <th>Descripción</th>
             <th id="colStockHeader">Stock</th>
             <th>Precio venta</th>
-            <th class="col-cost">Costo compra</th>
+            <th class="col-cost" title="Lo que pagaste por unidad, IGV incluido">Costo compra (c/IGV)</th>
             <th></th>
           </tr>
         </thead>
@@ -159,15 +159,21 @@
       </div>
       <div class="form-group">
         <label class="form-label">Origen</label>
-        <select class="form-input" id="editTipo"><option value="">Sin clasificar</option><option value="nacional">Nacional (llega sin comprobante)</option><option value="importado">Importado (con factura o boleta)</option></select>
+        <select class="form-input" id="editTipo"><option value="" disabled hidden>Elegir…</option><option value="nacional">Nacional</option><option value="importado">Importado</option></select>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Cantidad</label>
           <input class="form-input text-mono" id="editStock" type="number" min="0">
         </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Precio (S/)</label>
+          <label class="form-label">Costo de compra (S/, con IGV)</label>
+          <input class="form-input text-mono" id="editCost" type="number" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Precio de venta (S/)</label>
           <input class="form-input text-mono" id="editPrice" type="number" min="0" step="0.01">
         </div>
       </div>
@@ -210,7 +216,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">Origen</label>
-        <select class="form-input" id="addTipo"><option value="">Elegir…</option><option value="nacional">Nacional (llega sin comprobante)</option><option value="importado">Importado (con factura o boleta)</option></select>
+        <select class="form-input" id="addTipo"><option value="" disabled hidden selected>Elegir…</option><option value="nacional">Nacional</option><option value="importado">Importado</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">Almacén donde entra</label>

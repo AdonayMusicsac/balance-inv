@@ -162,3 +162,57 @@ test('Facturas reales de 4 proveedores: proveedor, RUC, serie/número, fecha y p
   assert.deepEqual([H.proveedor, H.ruc, H.serie, H.fecha], ['HUAMAN MERCADOS MUSICALES S.A.C', '20614729067', 'FFF1', '2026-10-05']);
   assert.deepEqual(H.lineas, [{ codigo: '062033039', desc: 'PARCHES **EVANS** B14UV1 | B14UV1-PARCHE DE TAROLA/TIMBAL DE 14" - UV1 - CTD - BLANCO - UNA CAPA', qty: 1, precio: 75 }]);
 });
+
+test('Stock: el costo de compra es lo pagado CON IGV (2 unidades por 100 → 50 c/u), no el costo sin IGV', async () => {
+  const { window, firebase } = app();
+  await window.registrarFactura({ proveedor: 'Clevan SAC', ruc: '20123456789', fecha: '2026-10-02', compTipo: 'Factura', compSerie: 'F001', compNum: '77', almacen: 'alm1' },
+    [{ nuevo: { code: 'X1', nombre: 'X', tipo: 'nacional' }, tipo: 'nacional', qty: 2, precio: 50 }]);
+  const k = Object.values(firebase._store.costos)[0];
+  assert.equal(k.costoUnit, 42.375);                         // contable: sin IGV (50 ÷ 1,18)
+  const c = await window.costosPorProducto();
+  assert.equal(c.X1.prom, 50); assert.equal(c.X1.ultimo, 50);  // lo que se ve en Stock: lo pagado
+  await window.registrarFactura({ proveedor: 'Clevan SAC', ruc: '20123456789', fecha: '2026-10-03', compTipo: 'Factura', compSerie: 'F001', compNum: '78', almacen: 'alm1' },
+    [{ code: 'X1', nombre: 'X', tipo: 'nacional', qty: 2, precio: 60 }]);
+  assert.equal((await window.costosPorProducto()).X1.prom, 55);   // promedio ponderado: (100 + 120) ÷ 4
+});
+
+test('Costo guardado en el producto (lo ven todos): lo pagado c/IGV, promedio con el stock que había, y se recalcula al anular', async () => {
+  const { window, firebase } = app({ Y1: { name: 'Y', stock: 2, tipo: 'nacional', costoCompra: 10 } });   // ya había 2 unidades a S/ 10
+  const h = n => ({ proveedor: 'Clevan SAC', ruc: '20123456789', fecha: '2026-10-02', compTipo: 'Factura', compSerie: 'F001', compNum: String(n), almacen: 'alm1' });
+  const r = await window.registrarFactura(h(1), [{ code: 'Y1', nombre: 'Y', tipo: 'nacional', qty: 2, precio: 30 }]);   // 2 más a S/ 30 con IGV
+  assert.equal(firebase._store.products.Y1.costoCompra, 20);                       // (2×10 + 2×30) ÷ 4
+  assert.equal(firebase._store.products.Y1.costoUltimo, 30);
+  await window.anularCompra(r.ids[0]);
+  assert.equal(firebase._store.products.Y1.stock, 2);
+  // sin compras vigentes el costo queda como estaba; con otras compras se recalcula
+  const r1 = await window.registrarFactura(h(2), [{ code: 'Y1', nombre: 'Y', tipo: 'nacional', qty: 1, precio: 50 }]);
+  const r2 = await window.registrarFactura(h(3), [{ code: 'Y1', nombre: 'Y', tipo: 'nacional', qty: 3, precio: 70 }]);
+  await window.anularCompra(r1.ids[0]);
+  assert.equal(firebase._store.products.Y1.costoCompra, 70);                       // queda solo la de 3 × 70
+});
+
+test('Editar producto: costo de compra y precio de venta se guardan; el origen es obligatorio (Nacional o Importado)', async () => {
+  const { window, firebase } = loadApp(['tests/helpers/stub-auth.js', 'firebase.js', 'selection.js', 'balance-logic.js', 'compras-import.js', 'stock.js'], '<div id="viewRoot"></div>');
+  const fs = require('fs'), path = require('path'), d = window.document;
+  firebase._store.products = { E1: { name: 'DADDARIO', stock: 5, price: 0, tipo: 'importado', costoCompra: 19.07 }, E2: { name: 'SIN ORIGEN', stock: 1, price: 0 } };
+  await new Promise(r => setTimeout(r, 150));
+  d.getElementById('viewRoot').innerHTML = fs.readFileSync(path.join(__dirname, '..', 'views', 'stock-view.html'), 'utf8');
+  await window.refreshProductsNow(); window.Stock.init(); await new Promise(r => setTimeout(r, 150));
+  // el selector de origen solo ofrece Nacional e Importado
+  assert.deepEqual([...d.getElementById('editTipo').options].filter(o => !o.disabled).map(o => o.value), ['nacional', 'importado']);
+  // el costo y el precio se editan
+  window.openEditStock('E1', 'DADDARIO', 5, 0, 'general', '');
+  assert.equal(d.getElementById('editCost').value, '19.07');
+  d.getElementById('editCost').value = '22.5'; d.getElementById('editPrice').value = '40';
+  window.saveStock(); await new Promise(r => setTimeout(r, 150));
+  assert.deepEqual([firebase._store.products.E1.costoCompra, firebase._store.products.E1.price, firebase._store.products.E1.tipo], [22.5, 40, 'importado']);
+  // sin tocar el costo, no se pisa (aunque el promedio tenga más decimales)
+  firebase._store.products.E1.costoCompra = 22.4983;
+  await window.refreshProductsNow(); await new Promise(r => setTimeout(r, 100));
+  window.openEditStock('E1', 'DADDARIO', 5, 40, 'general', ''); window.saveStock(); await new Promise(r => setTimeout(r, 150));
+  assert.equal(firebase._store.products.E1.costoCompra, 22.4983);
+  // un producto sin origen obliga a elegirlo
+  let aviso = ''; window.alert = m => { aviso = m; };
+  window.openEditStock('E2', 'SIN ORIGEN', 1, 0, 'general', ''); window.saveStock(); await new Promise(r => setTimeout(r, 100));
+  assert.match(aviso, /origen/i); assert.equal(firebase._store.products.E2.tipo, undefined);
+});

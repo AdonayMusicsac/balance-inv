@@ -64,12 +64,12 @@ test('E2E: compra desde el comprobante → aparece en Stock (solo en su almacén
   window.switchWarehouse('alm3'); assert.deepEqual(filas(), []);
   window.switchWarehouse('');
 
-  // 3) Costo de compra visible (G1: 118 c/IGV con factura → 100 sin IGV)
+  // 3) Costo de compra visible = lo pagado CON IGV (G1: 2 × 118 → 118 por unidad; J-77: 6 × 11.80)
   const c = await window.costosPorProducto();
-  assert.equal(c.G1.prom, 100); assert.equal(Math.round(c['J-77'].prom * 100) / 100, 10);
+  assert.equal(c.G1.prom, 118); assert.equal(Math.round(c['J-77'].prom * 100) / 100, 11.8);
 
   window.cargarCostosStock(); await wait(200);
-  assert.match(d.getElementById('statValue').textContent.replace(/\s/g, ''), /^S\/660/);   // 6×100 + 6×10 (a costo, no a precio de venta)
+  assert.match(d.getElementById('statValue').textContent.replace(/\s/g, ''), /^S\/778\.8/);   // 6×118 + 6×11.80 (a costo con IGV, no a precio de venta)
   assert.ok(d.querySelector('#productTableBody .stock-edit-btn') && d.querySelector('#productTableBody .stock-del-btn'));
 
   // 4) Anular la compra revierte stock y almacén
