@@ -8,7 +8,7 @@ function copiaEstatica(nodo) {
   if (!out.activo) { out.nombre = ''; out.whatsapp = ''; return out; }
   Object.entries(n.productos || {}).forEach(([code, p]) => {
     if (!p || !String(p.nombre || '').trim()) return;
-    out.productos[code] = { nombre: String(p.nombre).slice(0, 200), categoria: String(p.categoria || '').slice(0, 100), imagen: https(p.imagen), disponible: p.disponible !== false, actualizadoEn: Number(p.actualizadoEn) || 0 };
+    out.productos[code] = { nombre: String(p.nombre).slice(0, 200), categoria: String(p.categoria || '').slice(0, 100), imagen: https(p.imagen), ...(p.descripcion ? { descripcion: String(p.descripcion).slice(0, 300) } : {}), ...(Array.isArray(p.imagenes) || (p.imagenes && typeof p.imagenes === 'object') ? (l => l.length > 1 ? { imagenes: l } : {})(Object.values(p.imagenes).map(https).filter(Boolean).slice(0, 6)) : {}), disponible: p.disponible !== false, actualizadoEn: Number(p.actualizadoEn) || 0 };
   });
   return out;
 }

@@ -122,3 +122,54 @@ test('meta/rucApi (token de consulta RUC): solo el administrador lo lee o escrib
   assert.ok(can('read', { path: 'meta/seeded', db: DBm, auth: VEND }) && can('write', { path: 'meta/seeded', db: DBm, auth: VEND, value: true }));
   assert.ok(!can('read', { path: 'meta', db: DBm, auth: VEND }), 'no se puede leer todo meta de golpe');
 });
+
+// Evalúa los .validate de un nodo de reglas contra un valor. Solo existen los métodos que Firebase de verdad ofrece en las reglas
+// (val, isString, isBoolean, isNumber, hasChildren, hasChild, exists…): si una regla usa otro (p. ej. numChildren), la prueba FALLA, igual que el editor de Firebase.
+function valida(regla, valor, vars = {}) {
+  const nd = v => ({
+    val: () => v, exists: () => v != null, isString: () => typeof v === 'string', isBoolean: () => typeof v === 'boolean', isNumber: () => typeof v === 'number',
+    hasChildren: ks => !!v && typeof v === 'object' && (ks ? ks.every(k => k in v) : Object.keys(v).length > 0), hasChild: k => !!v && typeof v === 'object' && k in v });
+  const sv = regla['.validate'], nombres = Object.keys(vars);
+  if (sv !== undefined && !(typeof sv === 'boolean' ? sv : new Function('newData', ...nombres, `return (${sv});`)(nd(valor), ...nombres.map(k => vars[k])))) return false;
+  if (valor && typeof valor === 'object') for (const [k, hijo] of Object.entries(valor)) {
+    const comodin = Object.keys(regla).find(x => x.startsWith('$')), sub = regla[k] || regla[comodin];
+    if (sub && !valida(sub, hijo, regla[k] ? vars : { ...vars, [comodin]: k })) return false;
+  }
+  return true;
+}
+
+// Revisa TODAS las reglas del archivo: que solo llamen a métodos que existen en las reglas de Firebase.
+function metodosInvalidos(rules) {
+  const permitidos = new Set(['child', 'parent', 'hasChild', 'hasChildren', 'exists', 'getPriority', 'isNumber', 'isString', 'isBoolean', 'val', 'contains', 'beginsWith', 'endsWith', 'replace', 'toLowerCase', 'toUpperCase', 'matches', 'length', 'push']);
+  const malos = [];
+  (function recorre(n, ruta) {
+    for (const [k, v] of Object.entries(n)) {
+      if (typeof v === 'string' && k.startsWith('.') && k !== '.indexOn') {
+        for (const m of v.matchAll(/\.([A-Za-z_]\w*)\s*\(/g)) if (!permitidos.has(m[1])) malos.push(`${ruta}/${k}: .${m[1]}()`);
+      } else if (v && typeof v === 'object' && !Array.isArray(v)) recorre(v, ruta + '/' + k);
+    }
+  })(rules, '');
+  return malos;
+}
+test('reglas: solo usan métodos que Firebase reconoce (evita errores como «No such method numChildren»)', () => {
+  assert.deepEqual(metodosInvalidos(rules), []);
+  // el revisor de verdad atrapa el error que se coló: numChildren no existe en las reglas de Firebase
+  const mala = JSON.parse(JSON.stringify(rules)); mala.catalogoPublico.productos.$code.imagenes = { '.validate': 'newData.hasChildren() && newData.numChildren() <= 6' };
+  assert.deepEqual(metodosInvalidos(mala), ['/catalogoPublico/productos/$code/imagenes/.validate: .numChildren()']);
+});
+
+test('catálogo público: descripción (≤300) y hasta 6 fotos https; nada más', () => {
+  String.prototype.matches = function (re) { return re.test(this); };   // función propia de las reglas de Firebase
+  try {
+    const regla = rules.catalogoPublico.productos.$code, base = { nombre: 'ATEMPO', disponible: true };
+    const ok = v => valida(regla, { ...base, ...v });
+    assert.ok(ok({}) && ok({ descripcion: 'CAJON MIXTO ENLADRILLADO' }));
+    assert.ok(!ok({ descripcion: 'x'.repeat(301) }), 'descripción demasiado larga');
+    assert.ok(ok({ imagen: 'https://res.cloudinary.com/x/a.jpg', imagenes: ['https://res.cloudinary.com/x/a.jpg', 'https://res.cloudinary.com/x/b.jpg'] }));
+    assert.ok(ok({ imagenes: Array.from({ length: 6 }, (_, i) => `https://x.com/${i}.jpg`) }));
+    assert.ok(!ok({ imagenes: Array.from({ length: 7 }, (_, i) => `https://x.com/${i}.jpg`) }), 'más de 6 fotos');
+    assert.ok(!ok({ imagenes: ['javascript:alert(1)'] }), 'solo https');
+    assert.ok(!ok({ imagenes: [] }), 'una lista vacía no se escribe');
+    assert.ok(!ok({ precio: 500 }) && !ok({ costoCompra: 280 }), 'el precio y el costo nunca se publican');
+  } finally { delete String.prototype.matches; }
+});

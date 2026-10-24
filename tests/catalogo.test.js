@@ -72,7 +72,7 @@ test('reglas: el catálogo solo se lee si está activo y solo admite campos púb
   assert.match(r['.read'], /child\('activo'\)\.val\(\) === true/);
   assert.match(r['.write'], /'admin'/);
   const campos = Object.keys(r.productos.$code).filter(k => !k.startsWith('.') && k !== '$other').sort();
-  assert.deepEqual(campos, ['actualizadoEn', 'categoria', 'descripcion', 'disponible', 'imagen', 'nombre']);
+  assert.deepEqual(campos, ['actualizadoEn', 'categoria', 'descripcion', 'disponible', 'imagen', 'imagenes', 'nombre']);
   assert.equal(r.productos.$code.$other['.validate'], false);
 });
 
@@ -211,4 +211,111 @@ test('catálogo: la descripción del producto es pública (máx. 300 caracteres)
   assert.ok(!('price' in o) && !('costoCompra' in o) && !JSON.stringify(o).includes('280'));
   assert.equal(window.productoPublico({ name: 'X', desc: 'a'.repeat(500) }).descripcion.length, 300);
   assert.equal('descripcion' in window.productoPublico({ name: 'X' }), false);   // sin descripción no se escribe el campo
+});
+
+// ---------- Fotos: varias por producto, editor y carrusel público ----------
+test('fotos: la principal más las demás (máx. 6, solo https, sin repetir) y el espejo público las lleva solo si hay más de una', () => {
+  const { window } = setup({});
+  const A = 'https://res.cloudinary.com/x/a.jpg', B = 'https://res.cloudinary.com/x/b.jpg';
+  assert.deepEqual(JSON.parse(JSON.stringify(window.fotosDe({ image: A }))), [A]);                              // producto viejo: una sola foto
+  assert.deepEqual(JSON.parse(JSON.stringify(window.fotosDe({ image: A, images: [B, A, 'javascript:x'] }))), [A, B]);
+  assert.equal(window.fotosDe({ images: Array.from({ length: 9 }, (_, i) => `https://x.com/${i}.jpg`) }).length, 6);
+  assert.equal('imagenes' in window.productoPublico({ name: 'X', image: A }), false);                          // una foto: solo `imagen`
+  const g = JSON.parse(JSON.stringify(window.productoPublico({ name: 'X', images: [A, B] })));
+  assert.deepEqual([g.imagen, g.imagenes], [A, [A, B]]);
+});
+
+test('fotos: guardar la lista actualiza la principal y borrar la última las quita', async () => {
+  const { window, firebase } = setup({ G1: { name: 'G', stock: 1 } });
+  const A = 'https://res.cloudinary.com/x/a.jpg', B = 'https://res.cloudinary.com/x/b.jpg';
+  assert.deepEqual(JSON.parse(JSON.stringify(await window.guardarFotos('G1', [A, B, 'javascript:1']))), [A, B]);
+  assert.deepEqual([firebase._store.products.G1.image, JSON.parse(JSON.stringify(firebase._store.products.G1.images))], [A, [A, B]]);
+  await window.guardarFotos('G1', [B]);                         // la principal pasa a ser B
+  assert.equal(firebase._store.products.G1.image, B);
+  await window.guardarFotos('G1', []);
+  assert.deepEqual([firebase._store.products.G1.image, firebase._store.products.G1.images], [undefined, undefined]);
+});
+
+test('editor de foto: el recorte llena siempre el marco y la foto no se puede arrastrar fuera', () => {
+  const { window } = setup({});
+  assert.equal(window.escalaCubrir(2000, 1000, 400, 400), 0.4);                      // foto horizontal en marco cuadrado: manda la altura
+  assert.equal(window.escalaCubrir(1000, 2000, 400, 400), 0.4);
+  const s = window.escalaCubrir(2000, 1000, 400, 400) * 2;                          // zoom 2×
+  const l = JSON.parse(JSON.stringify(window.limitarDesplazamiento(2000, 1000, s, 400, 400, 9999, -9999)));
+  assert.deepEqual(l, { ox: (2000 * s - 400) / 2, oy: -(1000 * s - 400) / 2 });     // tope en cada lado
+  assert.deepEqual(JSON.parse(JSON.stringify(window.limitarDesplazamiento(2000, 1000, 0.4, 400, 400, 50, 50))), { ox: 50, oy: 0 });   // sin zoom no hay margen vertical
+  assert.deepEqual(JSON.parse(JSON.stringify(window.marcoFoto(1, 520, 300))), { vw: 300, vh: 300 });
+  assert.deepEqual(JSON.parse(JSON.stringify(window.marcoFoto(4 / 3, 520, 520))), { vw: 520, vh: 390 });
+});
+
+test('página pública: la foto única va sola; con varias hay carrusel con puntos, la descripción se ve y el visor pasa de una a otra', async () => {
+  const { JSDOM } = require('jsdom');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'www', 'catalogo-publico.html'), 'utf8').replace(/<script[^>]*src[^>]*><\/script>/g, '');
+  const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://x.github.io/app/catalogo-publico.html', pretendToBeVisual: true, beforeParse(w) {
+    w.firebase = { initializeApp() {}, database() { return { ref() { return { on() {}, once() { return Promise.resolve({ val() { return null; }, exists() { return false; } }); }, off() {} }; } }; } };
+  } });
+  await new Promise(r => setTimeout(r, 300));
+  const w = dom.window, A = 'https://res.cloudinary.com/x/upload/a.jpg', B = 'https://res.cloudinary.com/x/upload/b.jpg';
+  const h = w.itemHtmlPublico({ code: 'A1', nombre: 'ATEMPO', descripcion: 'CAJON MIXTO ENLADRILLADO', categoria: 'x', imagen: A, imagenes: [A, B, 'javascript:alert(1)'], disponible: true }, '51999');
+  assert.ok(/cp-car-track/.test(h) && (h.match(/cp-car-slide/g) || []).length === 2 && /cp-dots/.test(h) && /CAJON MIXTO ENLADRILLADO/.test(h) && !/javascript:/.test(h));
+  assert.ok(!/cp-car-track/.test(w.itemHtmlPublico({ code: 'A2', nombre: 'X', categoria: 'x', imagen: A, disponible: true }, '51999')));
+  w.eval("cpProductos = [{ code: 'A1', nombre: 'ATEMPO', imagen: '" + A + "', imagenes: ['" + A + "', '" + B + "'] }]");
+  w.abrirLightboxProducto('A1', 0);
+  const img = () => w.document.getElementById('cpLightboxImg').getAttribute('src'), cont = () => w.document.getElementById('cpLbCount').textContent;
+  assert.deepEqual([img(), cont()], [A, '1 / 2']);
+  w.lbMover(1); assert.deepEqual([img(), cont()], [B, '2 / 2']);
+  w.lbMover(1); assert.equal(img(), A);                                              // da la vuelta
+  assert.ok(w.document.getElementById('cpLightbox').classList.contains('galeria'));
+});
+
+test('editor de foto (con lienzo simulado): mueve, hace zoom, gira, cambia de proporción; cancelar no devuelve nada y aceptar entrega una imagen del tamaño del marco', async () => {
+  const { window } = setup({});
+  const d = window.document, llamadas = [];
+  const ctx = new Proxy({}, { get: (t, k) => (k === 'filter' ? 'none' : (...a) => { llamadas.push([k, a]); }), set: () => true, has: (t, k) => k === 'filter' });
+  window.HTMLCanvasElement.prototype.getContext = () => ctx;
+  window.HTMLCanvasElement.prototype.toBlob = function (cb, tipo, cal) { cb({ tipo, cal, w: this.width, h: this.height }); };
+  window.HTMLCanvasElement.prototype.setPointerCapture = () => {};
+  window.URL.createObjectURL = () => 'blob:x'; window.URL.revokeObjectURL = () => {};
+  window.Image = class { set src(v) { this.naturalWidth = 3000; this.naturalHeight = 2000; setTimeout(() => this.onload && this.onload(), 0); } };
+  const foto = { type: 'image/jpeg', size: 1000 };
+  const tick = () => new Promise(r => setTimeout(r, 10));
+  const pulsa = sel => d.querySelector(sel).click();
+
+  // cancelar: no devuelve nada
+  let p = window.abrirEditorFoto(foto); await tick();
+  assert.ok(d.querySelector('.foto-ed-canvas'), 'se abre el editor');
+  pulsa('[data-x="cancel"]'); assert.equal(await p, null); assert.equal(d.querySelector('.foto-ed-ov'), null);
+
+  // editar y aceptar
+  p = window.abrirEditorFoto(foto); await tick();
+  pulsa('[data-z="+"]'); pulsa('[data-rot="1"]'); pulsa('[data-asp="4:3"]');
+  d.querySelector('.foto-ed-zoom').value = '2.5'; d.querySelector('.foto-ed-zoom').dispatchEvent(new window.Event('input'));
+  d.querySelector('.foto-ed-brillo').value = '110'; d.querySelector('.foto-ed-brillo').dispatchEvent(new window.Event('input'));
+  assert.ok(llamadas.some(([k]) => k === 'drawImage') && llamadas.some(([k]) => k === 'rotate'), 'dibuja la foto girada');
+  pulsa('[data-x="ok"]');
+  const blob = await p;
+  assert.equal(blob.tipo, 'image/jpeg');
+  assert.ok(Math.max(blob.w, blob.h) <= 1200 && Math.abs(blob.w / blob.h - 4 / 3) < 0.02, `salida ${blob.w}×${blob.h} con proporción 4:3`);
+  assert.equal(d.querySelector('.foto-ed-ov'), null);
+
+  // archivo que no es imagen
+  let aviso = ''; window.alert = m => { aviso = m; };
+  assert.equal(await window.abrirEditorFoto({ type: 'application/pdf', size: 10 }), null); assert.match(aviso, /imagen/i);
+});
+
+test('gestor de fotos: agregar con editor, principal, mover y eliminar guardan en el producto', async () => {
+  const A = 'https://res.cloudinary.com/x/a.jpg', B = 'https://res.cloudinary.com/x/b.jpg', C = 'https://res.cloudinary.com/x/c.jpg';
+  const { window, firebase } = setup({ G1: { name: 'ATEMPO', stock: 1, image: A, images: [A, B] } });
+  const d = window.document, prod = { name: 'ATEMPO', image: A, images: [A, B] }, tick = () => new Promise(r => setTimeout(r, 20));
+  window.confirm = () => true;
+  window.gestionarFotos('G1', prod, () => {}); await tick();
+  assert.equal(d.querySelectorAll('.fg-item').length, 2);
+  d.querySelector('[data-a="principal"][data-i="1"]').click(); await tick();                       // B pasa a principal
+  assert.deepEqual([firebase._store.products.G1.image, JSON.parse(JSON.stringify(firebase._store.products.G1.images))], [B, [B, A]]);
+  d.querySelector('[data-a="der"][data-i="0"]').click(); await tick();                              // la mueve después
+  assert.equal(firebase._store.products.G1.image, A);
+  d.querySelector('[data-a="borrar"][data-i="0"]').click(); await tick();                           // elimina la principal
+  assert.deepEqual([firebase._store.products.G1.image, JSON.parse(JSON.stringify(firebase._store.products.G1.images))], [B, [B]]);
+  assert.match(d.querySelector('.fg-add').textContent, /1\/6/);
+  d.querySelector('.fg-ok').click(); assert.equal(d.querySelector('.foto-ed-ov'), null);
 });

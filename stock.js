@@ -20,7 +20,9 @@ function costoHtml(p) {
   if (!cu) return '<span class="pt-desc-empty">—</span>';
   const pr = Number(p.price) || 0, mg = pr > 0 ? `margen ${Math.round((pr - cu) / pr * 100)}%` : '';
   const ult = Number(p.costoUltimo) > 0 ? `Último: S/ ${Number(p.costoUltimo).toFixed(2)}` : '';
-  return `<span title="${ult}">S/ ${cu.toFixed(2)}</span><small style="display:block;color:${pr > 0 && cu > pr ? '#c62828' : 'var(--text-3)'}">${mg}</small>`;
+  const alza = typeof alzaCosto === 'function' ? alzaCosto(p.costoAnterior, p.costoUltimo) : null;   // la última compra costó más que la anterior
+  const sube = alza ? `<small style="display:block;color:#c62828;font-weight:600" title="Antes S/ ${alza.antes.toFixed(2)}">▲ subió ${alza.pct}%</small>` : '';
+  return `<span title="${ult}">S/ ${cu.toFixed(2)}</span>${sube}<small style="display:block;color:${pr > 0 && cu > pr ? '#c62828' : 'var(--text-3)'}">${mg}</small>`;
 }
 
 
@@ -163,6 +165,61 @@ function getFilteredProducts() {
     const texto = normalizarBusqueda(`${displayProductCode(p.code || '')} ${p.name || ''} ${p.desc || ''} ${p.category || ''}`);
     return palabras.every(w => texto.includes(w));
   });
+}
+
+
+// ---------------------------------------------------------
+// Ordenar nombres: deja el NOMBRE como marca (ATEMPO, DADDARIO…) y el detalle en la DESCRIPCIÓN, en los productos que ya estaban guardados.
+// Solo toca los que se pueden arreglar con seguridad; los que ya tienen otra descripción se dejan para revisarlos a mano.
+// ---------------------------------------------------------
+function proponerOrdenNombres(lista) {
+  const CI = window.ComprasImport, cambios = [];
+  let aRevisar = 0;
+  if (!CI || !CI.separarMarca) return { cambios, aRevisar };
+  const prods = {}; (lista || []).forEach(p => { prods[p.code] = p; });
+  const marcas = CI.marcasConocidas(prods), U = x => String(x || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  (lista || []).forEach(p => {
+    if (!p || p.deleted || !p.name) return;
+    const desc = String(p.desc || '').trim();
+    const sepNombre = CI.separarMarca(p.name, marcas);
+    if (sepNombre && sepNombre.desc && U(sepNombre.nombre) !== U(p.name)) {             // «CAJON MIXTO ENLADRILLADO ATEMPO» como nombre
+      if (desc && U(desc) !== U(p.name)) { aRevisar++; return; }                         // ya tiene otra descripción: a mano
+      cambios.push({ code: p.code, nombre: p.name, desc, nuevoNombre: sepNombre.nombre, nuevaDesc: sepNombre.desc });
+      return;
+    }
+    const sepDesc = desc ? CI.separarMarca(desc, marcas) : null;                         // nombre = detalle y la marca solo está en la descripción
+    if (sepDesc && sepDesc.desc && U(sepDesc.desc) && U(desc).includes(U(p.name)) && U(p.name) !== U(sepDesc.nombre)) {
+      cambios.push({ code: p.code, nombre: p.name, desc, nuevoNombre: sepDesc.nombre, nuevaDesc: sepDesc.desc });
+    }
+  });
+  return { cambios, aRevisar };
+}
+
+function abrirOrdenarNombres() {
+  const { cambios, aRevisar } = proponerOrdenNombres(productsCache);
+  document.getElementById('ordenarNombresOv')?.remove();
+  const ov = document.createElement('div'); ov.id = 'ordenarNombresOv'; ov.className = 'foto-ed-ov';
+  const nota = aRevisar ? `<p class="bal-note">${aRevisar} producto(s) ya tienen otra descripción y no se tocan: revisalos a mano.</p>` : '';
+  ov.innerHTML = `<div class="foto-ed" role="dialog" aria-modal="true" style="width:min(720px,100%)">
+    <div class="foto-ed-top"><strong>Ordenar nombres y descripciones</strong><span>El nombre queda como la marca y el detalle pasa a la descripción. Desmarcá lo que no quieras cambiar.</span></div>
+    ${cambios.length ? `<div class="on-lista" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto">${cambios.map((c, i) => `<label class="on-item" style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
+        <input type="checkbox" data-i="${i}" checked style="margin-top:4px"><span style="font-size:12.5px;line-height:1.4"><b>${escapeHtml(c.code)}</b><br><span style="color:var(--text-3)">Antes:</span> ${escapeHtml(c.nombre)}${c.desc ? ' · ' + escapeHtml(c.desc) : ''}<br><span style="color:#14403a;font-weight:600">Después:</span> <b>${escapeHtml(c.nuevoNombre)}</b> · ${escapeHtml(c.nuevaDesc)}</span></label>`).join('')}</div>` : '<p class="bal-note">No hay productos para ordenar: todos tienen ya la marca como nombre, o no se reconoció ninguna marca repetida.</p>'}
+    ${nota}<div class="on-msg fg-msg"></div>
+    <div class="foto-ed-acc"><button type="button" class="btn" data-x="cerrar">Cerrar</button>${cambios.length ? `<button type="button" class="btn btn-primary" data-x="aplicar">Aplicar cambios</button>` : ''}</div></div>`;
+  document.body.appendChild(ov);
+  ov.onclick = async e => {
+    const x = e.target.dataset && e.target.dataset.x;
+    if (x === 'cerrar' || e.target === ov) return ov.remove();
+    if (x !== 'aplicar') return;
+    const marcados = [...ov.querySelectorAll('input[type=checkbox]:checked')].map(i => cambios[Number(i.dataset.i)]);
+    if (!marcados.length) return;
+    ov.querySelector('.on-msg').textContent = 'Guardando…';
+    try {
+      for (const c of marcados) await refProducts.child(c.code).update({ name: c.nuevoNombre, desc: c.nuevaDesc, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+      if (typeof refreshProductsNow === 'function') await refreshProductsNow();
+      ov.remove(); alert(`Listo: ${marcados.length} producto(s) ordenados.`);
+    } catch (err) { ov.querySelector('.on-msg').textContent = ''; alert('No se pudo guardar: ' + err.message); }
+  };
 }
 
 function origenTagHtml(p) {
@@ -888,6 +945,7 @@ window.Stock = {
     // llama a renderProducts() internamente.
     switchWarehouse('');
     applyStockRoleRestrictions();
+    { const bo = document.getElementById('btnOrdenarNombres'); if (bo) bo.style.display = _verCosto() ? '' : 'none'; }
     if (!document.getElementById('stockCostStyle')) { const st = document.createElement('style'); st.id = 'stockCostStyle'; document.head.appendChild(st); }
     document.getElementById('stockCostStyle').textContent = '';   // el costo de compra lo ven todos los usuarios
     cargarCostosStock();

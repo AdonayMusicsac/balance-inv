@@ -10,15 +10,28 @@ const _urlHttps = u => (/^https:\/\/[^\s"'<>\\]+$/i.test(u || '') ? u : '');
 const _esAdminCat = () => typeof isAdmin !== 'function' || isAdmin();
 const _firma = o => JSON.stringify(Object.keys(o || {}).sort().map(k => [k, o[k]]));
 
+const MAX_FOTOS = 6;
+// Fotos de un producto: la lista `images` (o, en productos viejos, la única `image`). La primera es la principal.
+function fotosDe(p) {
+  p = p || {};
+  const lista = Array.isArray(p.images) ? p.images : (p.images && typeof p.images === 'object' ? Object.values(p.images) : []);
+  const urls = lista.map(_urlHttps).filter((u, i, a) => u && a.indexOf(u) === i);
+  const principal = _urlHttps(p.image);
+  if (principal) { const i = urls.indexOf(principal); if (i !== 0) { if (i > 0) urls.splice(i, 1); urls.unshift(principal); } }   // la principal siempre va primero
+  return urls.slice(0, MAX_FOTOS);
+}
+
 function productoPublico(p) {
+  const fotos = fotosDe(p);
   const o = {
     nombre: p.name || '',
     categoria: String(p.category || '').toLowerCase() === 'general' ? '' : (p.category || ''),
-    imagen: _urlHttps(p.image),
+    imagen: fotos[0] || '',
     disponible: (Number(p.stock) || 0) > 0
   };
   const d = String(p.desc || '').replace(/\s+/g, ' ').trim().slice(0, 300);   // la descripción es pública; precios y costos, nunca
   if (d) o.descripcion = d;
+  if (fotos.length > 1) o.imagenes = fotos;   // con varias fotos, la página pública las muestra en carrusel
   if (p.updatedAt) o.actualizadoEn = Number(p.updatedAt);
   return o;
 }
@@ -171,17 +184,162 @@ async function descargarCopiaCatalogo() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-async function subirFotoProducto(code, file) {
-  const blob = await comprimirImagen(file);
-  const url = await uploadImageToCloudinary(blob, code + '.jpg');
-  await refProducts.child(code).update({ image: url, updatedAt: firebase.database.ServerValue.TIMESTAMP });
-  return url;
+// ---------------------------------------------------------
+// Editor de foto: recortar, mover, hacer zoom, girar y ajustar brillo ANTES de guardar. Nada se sube hasta pulsar «Aceptar».
+// La geometría es pura (se prueba sin navegador); el dibujo usa un canvas.
+// ---------------------------------------------------------
+function escalaCubrir(w, h, vw, vh) { return Math.max(vw / w, vh / h); }                 // escala mínima para que la foto llene el marco
+function limitarDesplazamiento(w, h, s, vw, vh, ox, oy) {                                 // la foto nunca deja huecos dentro del marco
+  const mx = Math.max(0, (w * s - vw) / 2), my = Math.max(0, (h * s - vh) / 2);
+  return { ox: Math.min(mx, Math.max(-mx, ox)), oy: Math.min(my, Math.max(-my, oy)) };
+}
+function marcoFoto(aspecto, maxW, maxH) {                                                 // tamaño del marco de recorte para una proporción ancho/alto
+  let vw = maxW, vh = vw / aspecto;
+  if (vh > maxH) { vh = maxH; vw = vh * aspecto; }
+  return { vw: Math.max(40, Math.round(vw)), vh: Math.max(40, Math.round(vh)) };
+}
+const ASPECTOS_FOTO = [['1:1', 'Cuadrada', 1], ['4:5', 'Vertical', 4 / 5], ['4:3', 'Horizontal', 4 / 3], ['orig', 'Original', null]];
+
+function abrirEditorFoto(file) {
+  return new Promise(resolve => {
+    if (!file || !/^image\//.test(file.type)) { alert('Elige un archivo de imagen.'); return resolve(null); }
+    if (file.size > 25 * 1024 * 1024) { alert('La imagen pesa más de 25 MB.'); return resolve(null); }
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onerror = () => { URL.revokeObjectURL(url); alert('No se pudo leer la imagen.'); resolve(null); };
+    img.onload = () => iniciar();
+    img.src = url;
+
+    function iniciar() {
+      let rot = 0, zoom = 1, ox = 0, oy = 0, aspKey = '1:1', brillo = 100, vw = 300, vh = 300;
+      const dims = () => (rot % 2 ? { w: img.naturalHeight, h: img.naturalWidth } : { w: img.naturalWidth, h: img.naturalHeight });
+      const aspecto = () => { const a = ASPECTOS_FOTO.find(x => x[0] === aspKey)[2]; const d = dims(); return a || Math.min(3, Math.max(0.4, d.w / d.h)); };
+      const ov = document.createElement('div'); ov.className = 'foto-ed-ov';
+      ov.innerHTML = `<div class="foto-ed" role="dialog" aria-modal="true" aria-label="Ajustar foto">
+        <div class="foto-ed-top"><strong>Ajustar foto</strong><span>Arrastra para mover · pellizca o usa el zoom</span></div>
+        <div class="foto-ed-stage"><canvas class="foto-ed-canvas"></canvas></div>
+        <div class="foto-ed-asp">${ASPECTOS_FOTO.map(x => `<button type="button" class="btn foto-ed-a${x[0] === aspKey ? ' on' : ''}" data-asp="${x[0]}">${x[1]}</button>`).join('')}</div>
+        <div class="foto-ed-row"><button type="button" class="btn" data-z="-">−</button><input type="range" class="foto-ed-zoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom"><button type="button" class="btn" data-z="+">+</button>
+          <button type="button" class="btn" data-rot="-1" title="Girar a la izquierda">⟲</button><button type="button" class="btn" data-rot="1" title="Girar a la derecha">⟳</button></div>
+        <div class="foto-ed-row foto-ed-br"><label>Brillo <input type="range" class="foto-ed-brillo" min="70" max="130" step="1" value="100"></label></div>
+        <div class="foto-ed-acc"><button type="button" class="btn" data-x="cancel">Cancelar</button><button type="button" class="btn btn-primary" data-x="ok">✓ Aceptar y guardar</button></div></div>`;
+      document.body.appendChild(ov);
+      const q = s2 => ov.querySelector(s2), canvas = q('.foto-ed-canvas'), zoomEl = q('.foto-ed-zoom'), brEl = q('.foto-ed-brillo');
+      const ctx0 = canvas.getContext && canvas.getContext('2d');
+      const filtroOk = !!ctx0 && 'filter' in ctx0;
+      if (!filtroOk) q('.foto-ed-br').style.display = 'none';
+
+      function marco() {
+        const f = marcoFoto(aspecto(), Math.min(520, window.innerWidth - 40), Math.min(window.innerHeight * 0.5, 520));
+        vw = f.vw; vh = f.vh;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.style.width = vw + 'px'; canvas.style.height = vh + 'px'; canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
+      }
+      function dibujar(ctx, k) {
+        const d = dims(), s = escalaCubrir(d.w, d.h, vw, vh) * zoom, l = limitarDesplazamiento(d.w, d.h, s, vw, vh, ox, oy);
+        ox = l.ox; oy = l.oy;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, vw * k, vh * k);
+        if (filtroOk) ctx.filter = `brightness(${brillo}%)`;
+        ctx.translate(vw * k / 2 + ox * k, vh * k / 2 + oy * k); ctx.rotate(rot * Math.PI / 2); ctx.scale(s * k, s * k);
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        if (filtroOk) ctx.filter = 'none';
+      }
+      const pintar = () => { if (ctx0) dibujar(ctx0, canvas.width / vw); };
+      const poner = z => { zoom = Math.min(4, Math.max(1, z)); zoomEl.value = zoom; pintar(); };
+      const cerrar = r => { document.removeEventListener('keydown', tecla); ov.remove(); URL.revokeObjectURL(url); resolve(r); };
+      const tecla = e => { if (e.key === 'Escape') cerrar(null); };
+      document.addEventListener('keydown', tecla);
+      marco(); pintar();
+
+      // arrastrar (un dedo) y pellizcar (dos dedos)
+      const dedos = new Map(); let dist0 = 0, zoom0 = 1;
+      canvas.onpointerdown = e => { canvas.setPointerCapture(e.pointerId); dedos.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (dedos.size === 2) { const [a, b] = [...dedos.values()]; dist0 = Math.hypot(a.x - b.x, a.y - b.y); zoom0 = zoom; } };
+      canvas.onpointermove = e => {
+        const p = dedos.get(e.pointerId); if (!p) return;
+        if (dedos.size === 1) { ox += e.clientX - p.x; oy += e.clientY - p.y; p.x = e.clientX; p.y = e.clientY; pintar(); }
+        else { p.x = e.clientX; p.y = e.clientY; const [a, b] = [...dedos.values()]; if (dist0) poner(zoom0 * Math.hypot(a.x - b.x, a.y - b.y) / dist0); }
+      };
+      canvas.onpointerup = canvas.onpointercancel = e => { dedos.delete(e.pointerId); dist0 = 0; };
+      canvas.onwheel = e => { e.preventDefault(); poner(zoom - e.deltaY * 0.002); };
+
+      ov.onclick = e => {
+        const t = e.target, bz = t.dataset && t.dataset.z, br = t.dataset && t.dataset.rot, as = t.dataset && t.dataset.asp, x = t.dataset && t.dataset.x;
+        if (bz) poner(zoom + (bz === '+' ? 0.25 : -0.25));
+        else if (br) { rot = (rot + Number(br) + 4) % 4; ox = oy = 0; marco(); pintar(); }
+        else if (as) { aspKey = as; ox = oy = 0; ov.querySelectorAll('.foto-ed-a').forEach(b => b.classList.toggle('on', b.dataset.asp === as)); marco(); pintar(); }
+        else if (x === 'cancel' || t === ov) cerrar(null);
+        else if (x === 'ok') {
+          const k = Math.min(4, 1200 / Math.max(vw, vh)), out = document.createElement('canvas');
+          out.width = Math.round(vw * k); out.height = Math.round(vh * k);
+          dibujar(out.getContext('2d'), k);
+          out.toBlob(b => { if (b) cerrar(b); else alert('No se pudo procesar la foto.'); }, 'image/jpeg', 0.86);
+        }
+      };
+      zoomEl.oninput = () => poner(Number(zoomEl.value));
+      brEl.oninput = () => { brillo = Number(brEl.value); pintar(); };
+    }
+  });
+}
+
+// Guarda la lista de fotos del producto; la primera es la principal (y la que usan el Stock y los catálogos viejos).
+async function guardarFotos(code, urls) {
+  const lista = (urls || []).map(_urlHttps).filter(Boolean).slice(0, MAX_FOTOS);
+  await refProducts.child(code).update({ images: lista.length ? lista : null, image: lista[0] || null, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+  if (typeof programarSyncCatalogo === 'function') programarSyncCatalogo();
+  return lista;
+}
+
+// Foto nueva: editor → (al aceptar) subir a Cloudinary → devuelve la URL.
+async function subirFotoEditada(code, file) {
+  const blob = await abrirEditorFoto(file);
+  if (!blob) return '';                                   // canceló: no se guarda nada
+  if (cloudinaryConfigured()) return uploadImageToCloudinary(blob, `${code}-${Date.now().toString(36)}.jpg`);
+  const url = prompt('Cloudinary aún no está configurado. Pega la dirección (https://…) de la foto:');   // modo demo
+  if (!_urlHttps(url)) throw new Error('La dirección debe empezar con https://');
+  return url.trim();
+}
+
+// Ventana con todas las fotos del producto: agregar (con editor), elegir la principal, ordenar y eliminar.
+function gestionarFotos(code, producto, alCambiar) {
+  let lista = fotosDe(producto);
+  const ov = document.createElement('div'); ov.className = 'foto-ed-ov';
+  ov.innerHTML = `<div class="foto-ed foto-gest" role="dialog" aria-modal="true"><div class="foto-ed-top"><strong>Fotos de ${_esc(producto.name || code)}</strong><span>La primera es la principal. Máximo ${MAX_FOTOS}.</span></div>
+    <div class="fg-grid"></div><div class="fg-msg"></div>
+    <input type="file" class="fg-file" accept="image/*" style="display:none">
+    <div class="foto-ed-acc"><button type="button" class="btn fg-add">＋ Agregar foto</button><button type="button" class="btn btn-primary fg-ok">Listo</button></div></div>`;
+  document.body.appendChild(ov);
+  const q = s2 => ov.querySelector(s2), msg = t => { q('.fg-msg').textContent = t || ''; };
+  const pintar = () => {
+    q('.fg-grid').innerHTML = lista.map((u, i) => `<div class="fg-item"><img src="${_esc(u)}" alt="" loading="lazy">${i === 0 ? '<span class="fg-badge">Principal</span>' : ''}
+      <div class="fg-acc">${i > 0 ? `<button type="button" class="btn" data-a="principal" data-i="${i}" title="Poner como principal">★</button>` : ''}${i > 0 ? `<button type="button" class="btn" data-a="izq" data-i="${i}" title="Mover antes">‹</button>` : ''}${i < lista.length - 1 ? `<button type="button" class="btn" data-a="der" data-i="${i}" title="Mover después">›</button>` : ''}<button type="button" class="btn fg-del" data-a="borrar" data-i="${i}" title="Eliminar">🗑</button></div></div>`).join('') || '<p class="bal-note">Aún no hay fotos.</p>';
+    q('.fg-add').disabled = lista.length >= MAX_FOTOS; q('.fg-add').textContent = `＋ Agregar foto (${lista.length}/${MAX_FOTOS})`;
+  };
+  const aplicar = async nueva => { try { msg('Guardando…'); lista = await guardarFotos(code, nueva); Object.assign(producto, { images: lista.length ? lista : undefined, image: lista[0] || undefined }); msg(''); if (alCambiar) alCambiar(lista); } catch (e) { msg(''); alert('No se pudo guardar: ' + e.message); } pintar(); };
+  q('.fg-add').onclick = () => { q('.fg-file').value = ''; q('.fg-file').click(); };
+  q('.fg-file').onchange = async () => {
+    const f = q('.fg-file').files[0]; if (!f) return;
+    try { const url = await subirFotoEditada(code, f); if (url) { msg('Subiendo…'); await aplicar([...lista, url]); } }
+    catch (e) { msg(''); alert(e.message); }
+  };
+  q('.fg-grid').onclick = e => {
+    const a = e.target.dataset && e.target.dataset.a, i = Number(e.target.dataset && e.target.dataset.i);
+    if (!a) return;
+    const n = lista.slice();
+    if (a === 'borrar') { if (!confirm('¿Eliminar esta foto?')) return; n.splice(i, 1); }
+    else if (a === 'principal') n.unshift(n.splice(i, 1)[0]);
+    else if (a === 'izq') [n[i - 1], n[i]] = [n[i], n[i - 1]];
+    else if (a === 'der') [n[i + 1], n[i]] = [n[i], n[i + 1]];
+    aplicar(n);
+  };
+  q('.fg-ok').onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  pintar();
 }
 
 window.Catalogo = {
   async init() {
     const $ = id => document.getElementById(id), admin = _esAdminCat();
-    let cfg = {}, prods = [], filtro = 'todos', limite = CAT_PAGINA, codigoFoto = null;
+    let cfg = {}, prods = [], filtro = 'todos', limite = CAT_PAGINA;
     await recordarDireccionPublica();
     try { cfg = (await refCatalogoPublico.get()).val() || {}; } catch (e) { /* inactivo y sin permiso de lectura */ }
     $('catActivo').checked = cfg.activo === true; $('catNombre').value = cfg.nombre || '';
@@ -199,14 +357,15 @@ window.Catalogo = {
     };
     const pintar = () => {
       const q = $('catBuscar').value.trim().toLowerCase();
-      let l = prods.filter(p => !q || `${p.code} ${p.name} ${p.category || ''}`.toLowerCase().includes(q));
-      if (filtro === 'sinfoto') l = l.filter(p => !_urlHttps(p.image));
+      const palabras = q.normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(Boolean);
+      let l = prods.filter(p => { const t = `${p.code} ${p.name} ${p.desc || ''} ${p.category || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); return palabras.every(w => t.includes(w)); });
+      if (filtro === 'sinfoto') l = l.filter(p => !fotosDe(p).length);
       if (filtro === 'oculto') l = l.filter(p => p.publicar === false);
-      const conFoto = prods.filter(p => _urlHttps(p.image)).length;
+      const conFoto = prods.filter(p => fotosDe(p).length).length;
       $('catStats').textContent = `${conFoto} de ${prods.length} con foto · ${prods.filter(p => p.publicar !== false).length} publicados`;
       $('catGrid').innerHTML = l.slice(0, limite).map(p => {
-        const img = _urlHttps(p.image);
-        return `<div class="cat-item${p.publicar === false ? ' cat-oculto' : ''}"><div class="cat-thumb">${img ? `<img src="${_esc(img)}" alt="" loading="lazy">` : '<span>Sin foto</span>'}</div><div class="cat-body"><div class="cat-name">${_esc(p.name)}</div><div class="cat-sub">${_esc(p.code)}${p.category && p.category.toLowerCase() !== 'general' ? ' · ' + _esc(p.category) : ''}</div><div class="cat-actions"><button class="btn" data-foto="${_esc(p.code)}">${img ? 'Cambiar foto' : 'Subir foto'}</button>${admin ? `<label class="cat-switch"><input type="checkbox" data-pub="${_esc(p.code)}"${p.publicar === false ? '' : ' checked'}> Publicar</label>` : ''}</div></div></div>`;
+        const fotos = fotosDe(p), img = fotos[0] || '';
+        return `<div class="cat-item${p.publicar === false ? ' cat-oculto' : ''}"><div class="cat-thumb">${img ? `<img src="${_esc(img)}" alt="" loading="lazy">` : '<span>Sin foto</span>'}${fotos.length > 1 ? `<span class="cat-nfotos">${fotos.length} fotos</span>` : ''}</div><div class="cat-body"><div class="cat-name">${_esc(p.name)}</div>${p.desc ? `<div class="cat-desc">${_esc(p.desc)}</div>` : '<div class="cat-desc cat-sindesc">Sin descripción</div>'}<div class="cat-sub">${_esc(p.code)}${p.category && p.category.toLowerCase() !== 'general' ? ' · ' + _esc(p.category) : ''}</div><div class="cat-actions"><button class="btn" data-foto="${_esc(p.code)}">${fotos.length ? 'Fotos (' + fotos.length + ')' : 'Subir foto'}</button>${admin ? `<label class="cat-switch"><input type="checkbox" data-pub="${_esc(p.code)}"${p.publicar === false ? '' : ' checked'}> Publicar</label>` : ''}</div></div></div>`;
       }).join('') || '<p class="bal-note">No hay productos que coincidan.</p>';
       $('catMas').style.display = l.length > limite ? '' : 'none';
     };
@@ -235,26 +394,12 @@ window.Catalogo = {
     };
     $('catVerQr').onclick = abrirModalQrCatalogo;
     if ($('catJson')) $('catJson').onclick = () => descargarCopiaCatalogo().catch(e => alert(e.message));
-    $('catGrid').onclick = e => { const c = e.target.dataset && e.target.dataset.foto; if (c) { codigoFoto = c; $('catFile').value = ''; $('catFile').click(); } };
+    $('catGrid').onclick = e => { const c = e.target.dataset && e.target.dataset.foto; const pr = c && prods.find(x => x.code === c); if (pr) gestionarFotos(c, pr, () => pintar()); };
     $('catGrid').onchange = async e => {
       const c = e.target.dataset && e.target.dataset.pub;
       if (!c) return;
       try { await refProducts.child(c).update({ publicar: e.target.checked }); (prods.find(p => p.code === c) || {}).publicar = e.target.checked; programarSyncCatalogo(); pintar(); }
       catch (err) { e.target.checked = !e.target.checked; alert('No se pudo cambiar: ' + err.message); }
-    };
-    $('catFile').onchange = async () => {
-      const file = $('catFile').files[0];
-      if (!file || !codigoFoto) return;
-      $('catStats').textContent = 'Subiendo foto…';
-      try {
-        if (cloudinaryConfigured()) await subirFotoProducto(codigoFoto, file);
-        else {   // sin Cloudinary (demo): se puede pegar la dirección de una foto ya publicada
-          const url = prompt('Cloudinary aún no está configurado. Pega la dirección (https://…) de la foto:');
-          if (!_urlHttps(url)) throw new Error('La dirección debe empezar con https://');
-          await refProducts.child(codigoFoto).update({ image: url.trim(), updatedAt: firebase.database.ServerValue.TIMESTAMP });
-        }
-        await cargar();
-      } catch (err) { alert(err.message); pintar(); }
     };
     await cargar();
   }

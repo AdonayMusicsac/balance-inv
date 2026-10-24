@@ -67,6 +67,13 @@ const _provKey = (ruc, nombre) => (String(ruc || '').trim() || String(nombre || 
 // Comprobante normalizado: serie en mayúsculas sin espacios; número sin espacios ni ceros a la izquierda.
 const _numComprobante = (serie, numero) => [String(serie || '').trim().toUpperCase(), String(numero || '').trim().replace(/^0+(?=\d)/, '')].filter(Boolean).join('-');
 // Igual que el Excel: Total = cant × precio; Base = ROUND(total / 1.18, 2); IGV = Total − Base.
+// ¿Subió el costo respecto a la compra anterior? (≥ 1 %, para no avisar por redondeos). Devuelve null si no subió.
+function alzaCosto(antes, ahora) {
+  antes = Number(antes) || 0; ahora = Number(ahora) || 0;
+  if (!(antes > 0) || !(ahora > antes * 1.01)) return null;
+  return { antes: Math.round(antes * 100) / 100, ahora: Math.round(ahora * 100) / 100, pct: Math.round((ahora / antes - 1) * 100) };
+}
+window.alzaCosto = alzaCosto;
 const r4 = n => Math.round((n + Number.EPSILON) * 10000) / 10000;
 const calcularImportes = window.calcularImportes = (qty, precio) => { const total = _r2(qty * precio), base = _r2(total / IGV); return { total, base, igv: _r2(total - base) }; };
 
@@ -91,14 +98,16 @@ async function registrarCompra(c) {
   const costoTotal = _r2(baseUnit * tc * c.qty + gastos), costoUnit = Math.round((costoTotal / c.qty + Number.EPSILON) * 10000) / 10000;   // 4 decimales + total: sin perder céntimos en lotes grandes
   const facturaKey = c.docTipo && c.docNum ? `${provKey}|${c.docTipo}|${c.docNum}` : '';
   const almacen = _almValido(c.almacen);
-  const costoPrevio = Number(_val(await refProducts.child(c.code).get()).costoCompra) || 0;
+  const pPrevio = _val(await refProducts.child(c.code).get()), costoPrevio = Number(pPrevio.costoCompra) || 0, ultimoPrevio = Number(pPrevio.costoUltimo) || 0;
   const saldo = await moverStock(c.code, c.qty, almacen);
   const ref = refCompras.push();
   try {   // si algo falla después de mover el stock, se revierte todo
     // Costo de compra del producto = lo que se pagó CON IGV, en promedio ponderado con lo que ya había en stock (lo ven todos los usuarios).
     const unitPagado = (imp.total + gastos) / c.qty, stockPrevio = saldo - c.qty;
     const costoCompra = r4(costoPrevio > 0 && stockPrevio > 0 ? (stockPrevio * costoPrevio + c.qty * unitPagado) / saldo : unitPagado);
-    await refProducts.child(c.code).update({ tipo: c.tipo || 'nacional', ...(c.stockMin >= 0 ? { stockMin: c.stockMin } : {}), costoCompra, costoUltimo: r4(unitPagado), updatedAt: firebase.database.ServerValue.TIMESTAMP });
+    const alza = alzaCosto(ultimoPrevio, unitPagado);
+    if (alza && Array.isArray(c.alzas)) c.alzas.push({ code: c.code, nombre: c.nombre || c.code, ...alza });
+    await refProducts.child(c.code).update({ tipo: c.tipo || 'nacional', ...(c.stockMin >= 0 ? { stockMin: c.stockMin } : {}), costoCompra, costoUltimo: r4(unitPagado), costoAnterior: ultimoPrevio > 0 ? r4(ultimoPrevio) : null, updatedAt: firebase.database.ServerValue.TIMESTAMP });
     await refProveedores.child(provKey).update({ nombre: c.proveedor, ruc: c.ruc || '' });
     await ref.set({ code: c.code, nombre: c.nombre, proveedorId: provKey, proveedor: c.proveedor, ruc: c.ruc || '', cantidad: c.qty, precio: c.precio || 0, moneda: c.moneda || 'PEN',
       unidad: c.unidad || '', base: imp.base, igv: imp.igv, total: imp.total, gastos, pago: c.pago || '', nOperacion: c.nOperacion || '', estadoPago: c.estadoPago || '', observ: c.observ || '',
@@ -173,7 +182,7 @@ async function registrarFactura(h, lineas) {
   const codigos = nuevos.map(l => _claveCodigo(l.nuevo.code));
   if (new Set(codigos).size !== codigos.length) throw new Error('Hay dos productos nuevos con el mismo código en esta compra.');
   if (lineas.some(l => l.tipo === 'importado' || (l.nuevo && l.nuevo.tipo === 'importado')) && !conComp && !h.sinConfirmar && !confirm('Hay productos importados sin comprobante. ¿Guardar igual? Quedarán como "documentación pendiente".')) throw new Error('Compra no guardada.');
-  const facturaId = 'F' + Date.now().toString(36), hechas = [], creados = [], fallos = [];
+  const facturaId = 'F' + Date.now().toString(36), hechas = [], creados = [], fallos = [], alzas = [];
   try {
     for (const l of nuevos) {
       for (let intento = 0; ; intento++) {
@@ -188,7 +197,7 @@ async function registrarFactura(h, lineas) {
     for (const l of lineas) {
       const c0 = l.nuevo ? { code: _claveCodigo(l.nuevo.code), nombre: l.nuevo.nombre.trim(), tipo: l.nuevo.tipo } : {};
       const id = await registrarCompra({ proveedor: h.proveedor, ruc: h.ruc, fecha: h.fecha, pago: h.pago, nOperacion: h.nOperacion, estadoPago: h.estadoPago, observ: h.observ, almacen: l.almacen || h.almacen, moneda: h.moneda === 'USD' ? 'USD' : 'PEN', tc: h.tc, ...l, ...c0,
-        docTipo: conComp ? h.compTipo : '', docNum: num, docQty: conComp ? l.qty : 0, igvIncluido: true, facturaId, sinConfirmar: true });
+        docTipo: conComp ? h.compTipo : '', docNum: num, docQty: conComp ? l.qty : 0, igvIncluido: true, facturaId, sinConfirmar: true, alzas });
       hechas.push(id);
     }
   } catch (e) {
@@ -197,7 +206,7 @@ async function registrarFactura(h, lineas) {
     if (fallos.length) throw new Error(`${e.message} | Rollback parcial: no se pudo revertir todo (${fallos.join('; ')}). Revisa manualmente la factura ${facturaId} en Compras y Kardex.`);
     throw e;
   }
-  return { facturaId, ids: hechas, creados, ...lineas.reduce((a, l) => { const i = calcularImportes(l.qty, Number(l.precio)); return { total: _r2(a.total + i.total), base: _r2(a.base + i.base), igv: _r2(a.igv + i.igv) }; }, { total: 0, base: 0, igv: 0 }) };
+  return { facturaId, ids: hechas, creados, alzas, ...lineas.reduce((a, l) => { const i = calcularImportes(l.qty, Number(l.precio)); return { total: _r2(a.total + i.total), base: _r2(a.base + i.base), igv: _r2(a.igv + i.igv) }; }, { total: 0, base: 0, igv: 0 }) };
   } finally { await liberar(); }
 }
 
@@ -223,7 +232,9 @@ async function _recalcularCostoProducto(code) {
     if (!cs.length) return;
     const q = cs.reduce((a, x) => a + x.cantidad, 0), t = cs.reduce((a, x) => a + (x.total || 0) + (x.gastos > 0 ? x.gastos : 0), 0);
     const ult = cs.slice().sort((x, y) => (x.timestamp || 0) - (y.timestamp || 0)).pop();
-    await refProducts.child(code).update({ costoCompra: r4(t / q), costoUltimo: r4(((ult.total || 0) + (ult.gastos > 0 ? ult.gastos : 0)) / ult.cantidad), updatedAt: firebase.database.ServerValue.TIMESTAMP });
+    const ord = cs.slice().sort((x, y) => (x.timestamp || 0) - (y.timestamp || 0)), pen = ord.length > 1 ? ord[ord.length - 2] : null;
+    const unit = x => ((x.total || 0) + (x.gastos > 0 ? x.gastos : 0)) / x.cantidad;
+    await refProducts.child(code).update({ costoCompra: r4(t / q), costoUltimo: r4(unit(ult)), costoAnterior: pen ? r4(unit(pen)) : null, updatedAt: firebase.database.ServerValue.TIMESTAMP });
   } catch (e) { /* el costo se corrige solo con la siguiente compra */ }
 }
 async function anularCompra(id) { _soloAdmin(); return _revertirCompra(id); }
@@ -547,7 +558,7 @@ window.Compras = {
             <small class="bal-hint">Se crea con este código y descripción. Precios en Stock.</small>
           </div></td>
         <td data-label="Cantidad"><input class="ln-qty" type="number" min="1" inputmode="numeric" placeholder="Cant."></td>
-        <td data-label="Costo c/IGV"><input class="ln-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Costo unit. con IGV"></td>
+        <td data-label="Costo c/IGV"><input class="ln-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Costo unit. con IGV"><small class="ln-alza" style="display:none;color:#a15c00;font-weight:600"></small></td>
         <td data-label="Total" class="ln-total">S/ 0.00</td>
         <td data-label=""><button type="button" class="btn ln-del">Quitar</button></td>`;
       $('cpLineas').appendChild(tr); return tr;
@@ -560,6 +571,10 @@ window.Compras = {
     const tipoDe = l => l.esNuevo ? l.nuevo.tipo : (prods[l.code] || {}).tipo;
     const recalcular = () => {
       let t = { total: 0, base: 0, igv: 0 };
+      lineas().forEach(l => {
+        const av = l.tr.querySelector('.ln-alza'), al = !l.esNuevo && l.code ? alzaCosto((prods[l.code] || {}).costoUltimo, l.precio) : null;   // ¿costó más que la última compra?
+        av.style.display = al ? '' : 'none'; av.textContent = al ? `▲ +${al.pct}% frente a la última compra (S/ ${al.antes.toFixed(2)})` : '';
+      });
       lineas().forEach(l => { l.tr.querySelector('.ln-nuevo').style.display = l.esNuevo ? '' : 'none'; const i = calcularImportes(l.qty || 0, l.precio || 0); l.tr.querySelector('.ln-total').textContent = sol(i.total); t = { total: _r2(t.total + i.total), base: _r2(t.base + i.base), igv: _r2(t.igv + i.igv) }; });
       $('cpTotales').textContent = `Base ${sol(t.base)} · IGV 18 % ${sol(t.igv)} · Total ${sol(t.total)}`;
       const ls = lineas(), imp = ls.some(l => tipoDe(l) === 'importado'), sinTipo = ls.some(l => l.code && !l.esNuevo && !(prods[l.code] || {}).tipo);
@@ -574,7 +589,11 @@ window.Compras = {
 
     // ── leer comprobante (XML / PDF / foto) → previsualización → rellena el formulario ──
     const aplicarBorrador = (b, guardar) => {
-      const marca = window.ComprasImport && ComprasImport.marcaComun ? ComprasImport.marcaComun((b.lineas || []).filter(l => l.code === '__nuevo__').map(l => l.desc)) : '';   // marca repetida al final de las descripciones nuevas
+      // Tu convención: el NOMBRE es la marca (ATEMPO, DADDARIO…) y la DESCRIPCIÓN el detalle. La marca sale de los productos que ya tienes
+      // (nombres que se repiten) o de la palabra final que se repite en las descripciones de esta factura.
+      const CI = window.ComprasImport;
+      const marcaFactura = CI && CI.marcaComun ? CI.marcaComun((b.lineas || []).filter(l => l.code === '__nuevo__').map(l => l.desc)) : '';
+      const marcas = [...(CI && CI.marcasConocidas ? CI.marcasConocidas(prods) : []), ...(marcaFactura ? [marcaFactura] : [])];
       if (b.almacen && $('cpAlm')) $('cpAlm').value = b.almacen;
       $('cpProv').value = b.proveedor; $('cpRuc').value = b.ruc; $('cpCompTipo').value = b.tipo;
       if (b.fecha) $('cpDate').value = b.fecha; $('cpSerie').value = (b.serie || '').toUpperCase(); $('cpNumero').value = b.numero;
@@ -582,7 +601,11 @@ window.Compras = {
       (b.lineas.length ? b.lineas : [{}]).forEach(l => {
         const tr = nuevaLinea(); if (!l.code) return;
         tr.querySelector('.ln-prod').value = l.code; tr.querySelector('.ln-qty').value = l.qty; tr.querySelector('.ln-price').value = l.precio;
-        if (l.code === NUEVO) { tr.querySelector('.nv-code').value = l.codigoNuevo || ''; { const nom = (window.ComprasImport && ComprasImport.nombreCorto ? ComprasImport.nombreCorto(l.desc, marca) : l.desc) || ''; tr.querySelector('.nv-name').value = nom; tr.querySelector('.nv-desc').value = nom !== (l.desc || '') ? (l.desc || '') : ''; } tr.querySelector('.nv-tipo').value = l.tipoNuevo || (l.codigoNuevo ? 'importado' : 'nacional'); }
+        if (l.code === NUEVO) { tr.querySelector('.nv-code').value = l.codigoNuevo || ''; {
+          const sep = CI && CI.separarMarca ? CI.separarMarca(l.desc, marcas) : null;
+          if (sep) { tr.querySelector('.nv-name').value = sep.nombre; tr.querySelector('.nv-desc').value = sep.desc; }
+          else { const nom = (CI && CI.nombreCorto ? CI.nombreCorto(l.desc) : l.desc) || ''; tr.querySelector('.nv-name').value = nom; tr.querySelector('.nv-desc').value = nom !== (l.desc || '') ? (l.desc || '') : ''; }
+        } tr.querySelector('.nv-tipo').value = l.tipoNuevo || (l.codigoNuevo ? 'importado' : 'nacional'); }
       });
       tipoComp();
       if (guardar === true) $('cpSave').click();   // «Aprobar y guardar compra» desde el modal
@@ -630,7 +653,7 @@ window.Compras = {
     if ($('cpReset')) $('cpReset').onclick = () => {
       const hayDatos = ['cpProv', 'cpRuc', 'cpSerie', 'cpNumero', 'cpObs'].some(i => $(i) && $(i).value) || $('cpLineas').querySelector('.ln-prod') && [...$('cpLineas').querySelectorAll('.ln-prod')].some(s => s.value);
       if (hayDatos && !confirm('¿Limpiar todo el formulario? Se borrará lo que has escrito (no afecta compras ya registradas).')) return;
-      limpiarFormulario(); if ($('cpMsg')) $('cpMsg').style.display = 'none';
+      limpiarFormulario(); if ($('cpMsg')) $('cpMsg').style.display = 'none'; if ($('cpAlza')) $('cpAlza').style.display = 'none';
     };
     // Nombre del proveedor por su RUC: 1) el que ya se guardó en compras anteriores, 2) la API de consulta RUC (si el admin puso su token).
     const resolverProveedor = async ruc => {
@@ -684,6 +707,8 @@ window.Compras = {
         // Se comprueba en Firebase que lo guardado de verdad exista y se muestra el stock resultante.
         const hechas = await Promise.all(r.ids.map(id => refCompras.child(id).get().then(sn => sn.val())));
         if (hechas.some(x => !x)) throw new Error('La compra no quedó guardada en el servidor. Revisa tu conexión e inténtalo de nuevo.');
+        const caja = $('cpAlza');
+        if (caja) { caja.style.display = r.alzas && r.alzas.length ? 'block' : 'none'; caja.textContent = r.alzas && r.alzas.length ? '⚠ Subió el costo frente a la compra anterior:\n' + r.alzas.map(a => `• ${a.nombre}: S/ ${a.antes.toFixed(2)} → S/ ${a.ahora.toFixed(2)} (+${a.pct}%)`).join('\n') : ''; }
         mostrarMsg(`✓ Compra registrada · ${r.ids.length} producto${r.ids.length > 1 ? 's' : ''} · ${sol(r.total)}` + (r.creados.length ? ' · Pon el precio de venta en Stock' : ''), true);
         prods = await refProducts.get().then(_val);
         if (typeof refreshProductsNow === 'function') refreshProductsNow().catch(() => {});   // Stock se actualiza ya, sin esperar al listener

@@ -153,7 +153,38 @@
     const mejor = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
     return mejor && mejor[1] >= 2 && mejor[1] >= Math.ceil((descripciones || []).length / 2) ? mejor[0] : '';
   }
-  // Nombre corto para Stock: sin la marca final y antes de «CON …», «EN …» o una comilla; la descripción completa de la factura queda aparte.
+  // Marcas que ya usas: nombres de producto de una o dos palabras que se repiten en varios productos (ATEMPO, DADDARIO, FEVER…).
+  function marcasConocidas(prods) {
+    const cuenta = {};
+    Object.values(prods || {}).forEach(p => {
+      if (!p || p.deleted || !p.name) return;
+      const n = String(p.name).trim().replace(/\s+/g, ' '), pal = n.split(' ');
+      if (pal.length > 2 || n.length > 24 || /\d/.test(n) || !/[A-Za-zÁÉÍÓÚÑ]{3}/.test(n)) return;
+      const k = n.toUpperCase(); cuenta[k] = cuenta[k] || { n: 0, nombre: n }; cuenta[k].n++;
+    });
+    return Object.values(cuenta).filter(x => x.n >= 2).map(x => x.nombre);
+  }
+  // Si la descripción de la factura lleva una marca («CAJON MIXTO ENLADRILLADO ATEMPO»), el nombre es la marca y la descripción lo demás.
+  function separarMarca(desc, marcas) {
+    const d = String(desc || '').replace(/\s+/g, ' ').trim();
+    const orden = (marcas || []).filter(Boolean).slice().sort((a, b) => b.length - a.length);
+    for (const m of orden) {
+      const esc = m.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      const re = new RegExp('(^|[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ])(' + esc + ')(?![A-Za-z0-9ÁÉÍÓÚÑáéíóúñ])', 'i');
+      if (!re.test(d)) continue;
+      const resto = d.replace(re, '$1').replace(/\*+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s\-–|,]+|[\s\-–|,]+$/g, '').trim();
+      return { nombre: m.trim(), desc: resto };
+    }
+    return null;
+  }
+  // Marca que se repite al final de las descripciones de una misma factura («… ATEMPO»), aunque aún no exista ningún producto con ese nombre.
+  function marcaComun(descripciones) {
+    const cuenta = {};
+    (descripciones || []).forEach(d => { const pal = String(d || '').trim().split(/\s+/); const u = pal.length > 1 ? pal[pal.length - 1].toUpperCase() : ''; if (u.length >= 3 && /[A-ZÁÉÍÓÚÑ]{3}/.test(u) && !/\d/.test(u)) cuenta[u] = (cuenta[u] || 0) + 1; });
+    const mejor = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
+    return mejor && mejor[1] >= 2 && mejor[1] >= Math.ceil((descripciones || []).length / 2) ? mejor[0] : '';
+  }
+  // Sin marca conocida: nombre corto (antes de «CON …», «EN …» o una comilla) y la descripción completa de la factura aparte.
   function nombreCorto(desc, marca) {
     const d = String(desc || '').replace(/\s+/g, ' ').trim();
     if (!d) return '';
@@ -473,7 +504,7 @@
         <label class="ci-f ci-nuevo"><span>Código</span><input class="ci-cod" placeholder="Automático si va vacío" value="${esc(l.codigo || '')}"></label>
         <label class="ci-f ci-nuevo"><span>Origen</span><select class="ci-tipo"><option value="importado" selected>Importado</option><option value="nacional">Nacional</option></select></label>
         <label class="ci-f"><span>Cantidad</span><input class="ci-qty" type="number" min="1" value="${l.qty || 1}"></label>
-        <label class="ci-f"><span>Precio c/IGV</span><input class="ci-price" type="number" min="0" step="0.01" value="${l.precio || 0}"></label>
+        <label class="ci-f"><span>Precio c/IGV</span><input class="ci-price" type="number" min="0" step="0.01" value="${l.precio || 0}"><small class="ci-alza" style="display:none;color:#a15c00;font-weight:600"></small></label>
         <div class="ci-f"><span>Importe</span><b class="ci-imp">S/ 0.00</b></div>
       </div></td></tr>`;
     const filas = (borrador.lineas.length ? borrador.lineas : [{ codigo: '', desc: '', qty: 1, precio: 0 }]).map(fila).join('');
@@ -508,6 +539,10 @@
       let total = 0;
       q('ciLineas').querySelectorAll('tr').forEach(tr => {
         tr.querySelector('.ci-nuevo').style.display = tr.querySelector('.ci-prod').value === '__nuevo__' ? '' : 'none';
+        const codeSel = tr.querySelector('.ci-prod').value, avis = tr.querySelector('.ci-alza');
+        const ult = codeSel && codeSel !== '__nuevo__' && prods[codeSel] ? Number(prods[codeSel].costoUltimo) || 0 : 0, nuevo = Number(tr.querySelector('.ci-price').value) || 0;
+        const sube = ult > 0 && nuevo > ult * 1.01 ? Math.round((nuevo / ult - 1) * 100) : 0;   // ¿costó más que la última compra de ese producto?
+        avis.style.display = sube ? '' : 'none'; avis.textContent = sube ? `▲ +${sube}% frente a la última compra (S/ ${ult.toFixed(2)})` : '';
         const imp = r2((Number(tr.querySelector('.ci-qty').value) || 0) * (Number(tr.querySelector('.ci-price').value) || 0)); total += imp;
         tr.querySelector('.ci-imp').textContent = 'S/ ' + imp.toFixed(2);
       });
@@ -531,5 +566,5 @@
     q('ciGuardar').onclick = () => aprobar(true);      // rellena y guarda la compra
   }
 
-  window.ComprasImport = { marcaComun, rucValido, repararRuc, consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
+  window.ComprasImport = { marcasConocidas, separarMarca, marcaComun, rucValido, repararRuc, consultarRuc, nombreDeRespuesta, filasDesdeItems, nombreDeLogo, parecedireccion, nombreCorto, parseXml, parseTexto, leerArchivo, sugerirProducto, abrirPrevisualizacion };
 })();

@@ -254,12 +254,106 @@ test('Stock: la búsqueda encuentra por palabras en cualquier orden, sin tildes,
   assert.deepEqual(buscar('cajon zzz'), []);
 });
 
-test('Compra: la marca que se repite al final sale del nombre y la descripción completa queda aparte', () => {
+test('Compra: la marca es el NOMBRE y el detalle la DESCRIPCIÓN (marcas ya usadas o repetidas en la factura)', () => {
   const c = CI();
+  const prods = { A: { name: 'ATEMPO' }, B: { name: 'ATEMPO' }, C: { name: 'DADDARIO' }, D: { name: 'DADDARIO' }, E: { name: 'AFINADOR' }, F: { name: 'Guitarra clásica' } };
+  const marcas = c.marcasConocidas(prods);
+  assert.deepEqual(plain(marcas).sort(), ['ATEMPO', 'DADDARIO']);                 // los nombres que se repiten; «AFINADOR» (una sola vez) no es marca
+  assert.deepEqual(plain(c.separarMarca('CAJON MIXTO ENLADRILLADO ATEMPO', marcas)), { nombre: 'ATEMPO', desc: 'CAJON MIXTO ENLADRILLADO' });
+  assert.deepEqual(plain(c.separarMarca('CUERDAS NYLON BLANCO ENTORCHADO PLATEADO TENSION HARD DADDARIO', marcas)), { nombre: 'DADDARIO', desc: 'CUERDAS NYLON BLANCO ENTORCHADO PLATEADO TENSION HARD' });
+  assert.deepEqual(plain(c.separarMarca('PARCHES **DADDARIO** B14UV1 TAROLA', marcas)), { nombre: 'DADDARIO', desc: 'PARCHES B14UV1 TAROLA' });
+  assert.equal(c.separarMarca('AFINADOR CLIP CROMATICO', marcas), null);              // sin marca conocida
+  assert.equal(c.separarMarca('XATEMPOX CAJON', marcas), null);                       // solo palabra completa
+  // marca nueva repetida en la misma factura
   const descs = ['CHIMES 64 BARRAS CON FUNDA ATEMPO', 'PANDERETA NEGRA CROM ATEMPO', 'CAJON MIXTO ENLADRILLADO ATEMPO', 'PEDAL DE CAJON ATEMPO'];
-  const marca = c.marcaComun(descs);
-  assert.equal(marca, 'ATEMPO');
-  assert.deepEqual(descs.map(x => c.nombreCorto(x, marca)), ['CHIMES 64 BARRAS', 'PANDERETA NEGRA CROM', 'CAJON MIXTO ENLADRILLADO', 'PEDAL DE CAJON']);
-  assert.equal(c.marcaComun(['UKULELE STRINBERG UK-06C', 'CABLE 6M']), '');   // sin marca repetida no se inventa una
+  assert.equal(c.marcaComun(descs), 'ATEMPO');
+  assert.deepEqual(plain(c.separarMarca(descs[0], [c.marcaComun(descs)])), { nombre: 'ATEMPO', desc: 'CHIMES 64 BARRAS CON FUNDA' });
+  assert.equal(c.marcaComun(['UKULELE STRINBERG UK-06C', 'CABLE 6M']), '');
   assert.equal(c.nombreCorto('SOPORTE PARA SMARTPHONE HERCULES', ''), 'SOPORTE PARA SMARTPHONE HERCULES');
+});
+
+test('Aviso de costo: una compra más cara que la anterior se avisa (≥ 1 %); igual, más barata o producto nuevo no', async () => {
+  const { window, firebase } = app({ Z1: { name: 'ATEMPO', stock: 2, tipo: 'nacional', costoCompra: 100, costoUltimo: 100 } });
+  const h = n => ({ proveedor: 'Clevan SAC', ruc: '20123456789', fecha: '2026-10-02', compTipo: 'Factura', compSerie: 'F001', compNum: String(n), almacen: 'alm1' });
+  const a = window.alzaCosto;
+  assert.deepEqual(plain(a(100, 120)), { antes: 100, ahora: 120, pct: 20 });
+  assert.equal(a(100, 100.5), null); assert.equal(a(100, 90), null); assert.equal(a(0, 50), null); assert.equal(a(undefined, 50), null);
+  let r = await window.registrarFactura(h(1), [{ code: 'Z1', nombre: 'ATEMPO', tipo: 'nacional', qty: 1, precio: 120 }]);
+  assert.deepEqual(plain(r.alzas), [{ code: 'Z1', nombre: 'ATEMPO', antes: 100, ahora: 120, pct: 20 }]);
+  assert.deepEqual([firebase._store.products.Z1.costoUltimo, firebase._store.products.Z1.costoAnterior], [120, 100]);
+  r = await window.registrarFactura(h(2), [{ code: 'Z1', nombre: 'ATEMPO', tipo: 'nacional', qty: 1, precio: 110 }]);          // más barata que la última (120): sin aviso
+  assert.deepEqual(plain(r.alzas), []);
+  r = await window.registrarFactura(h(3), [{ nuevo: { code: 'N1', nombre: 'NUEVO', tipo: 'nacional' }, tipo: 'nacional', qty: 1, precio: 50 }]);   // producto nuevo: no hay compra anterior
+  assert.deepEqual(plain(r.alzas), []);
+});
+
+test('Aviso de costo: al anular la última compra, la anterior vuelve a ser la referencia', async () => {
+  const { window, firebase } = app({ W1: { name: 'W', stock: 0, tipo: 'nacional' } });
+  const h = n => ({ proveedor: 'Clevan SAC', ruc: '20123456789', fecha: '2026-10-02', compTipo: 'Factura', compSerie: 'F001', compNum: String(n), almacen: 'alm1' });
+  const r1 = await window.registrarFactura(h(1), [{ code: 'W1', nombre: 'W', tipo: 'nacional', qty: 1, precio: 100 }]);
+  const r2 = await window.registrarFactura(h(2), [{ code: 'W1', nombre: 'W', tipo: 'nacional', qty: 1, precio: 130 }]);
+  assert.deepEqual([firebase._store.products.W1.costoUltimo, firebase._store.products.W1.costoAnterior], [130, 100]);
+  await window.anularCompra(r2.ids[0]);
+  assert.deepEqual([firebase._store.products.W1.costoUltimo, firebase._store.products.W1.costoAnterior], [100, undefined]);   // solo queda la primera
+});
+
+test('Aviso de costo en pantalla: Stock marca «▲ subió» y el formulario avisa bajo el precio', async () => {
+  const { window, firebase } = loadApp(['tests/helpers/stub-auth.js', 'firebase.js', 'selection.js', 'balance-logic.js', 'compras-import.js', 'stock.js'], '<div id="viewRoot"></div>');
+  const fs = require('fs'), path = require('path'), d = window.document, tick = ms => new Promise(r => setTimeout(r, ms));
+  firebase._store.products = { Z1: { name: 'ATEMPO', stock: 2, tipo: 'nacional', costoCompra: 110, costoUltimo: 120, costoAnterior: 100 }, Z2: { name: 'DADDARIO', stock: 1, tipo: 'nacional', costoCompra: 50, costoUltimo: 50, costoAnterior: 50 } };
+  await tick(150);
+  assert.match(window.costoHtml({ code: 'Z1', ...firebase._store.products.Z1 }), /▲ subió 20%/);
+  assert.doesNotMatch(window.costoHtml({ code: 'Z2', ...firebase._store.products.Z2 }), /subió/);
+  d.getElementById('viewRoot').innerHTML = fs.readFileSync(path.join(__dirname, '..', 'views', 'compras-view.html'), 'utf8');
+  await window.Compras.init();
+  d.getElementById('cpAddLinea').click();
+  const tr = d.getElementById('cpLineas').lastElementChild;
+  tr.querySelector('.ln-prod').value = 'Z1'; tr.querySelector('.ln-qty').value = '1'; tr.querySelector('.ln-price').value = '150';
+  tr.querySelector('.ln-price').dispatchEvent(new window.Event('input', { bubbles: true }));
+  const av = tr.querySelector('.ln-alza');
+  assert.match(av.textContent, /\+25% frente a la última compra \(S\/ 120\.00\)/); assert.notEqual(av.style.display, 'none');
+  tr.querySelector('.ln-price').value = '120'; tr.querySelector('.ln-price').dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(av.style.display, 'none');
+});
+
+test('Aviso de costo en la ventana de revisión del PDF: al elegir un producto existente con precio mayor, avisa', () => {
+  const { window } = loadApp(['compras-import.js']), d = window.document;
+  const prods = { Z1: { name: 'ATEMPO', stock: 2, costoUltimo: 100 } };
+  window.ComprasImport.abrirPrevisualizacion({ origen: 'PDF', tipo: 'Factura', proveedor: 'X', ruc: '', serie: 'F001', numero: '1', fecha: '2026-10-02', moneda: 'PEN',
+    lineas: [{ codigo: '', desc: 'CUERDAS DESCONOCIDAS', qty: 1, precio: 125 }] }, prods, () => {});
+  const tr = d.querySelector('#ciLineas tr'), sel = tr.querySelector('.ci-prod'), av = tr.querySelector('.ci-alza');
+  assert.equal(av.style.display, 'none');                                  // producto nuevo: sin referencia
+  sel.value = 'Z1'; sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.match(av.textContent, /\+25% frente a la última compra \(S\/ 100\.00\)/);
+  tr.querySelector('.ci-price').value = '100'; tr.querySelector('.ci-price').dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(av.style.display, 'none');
+});
+
+test('Ordenar nombres: deja la marca como nombre y el detalle como descripción solo donde es seguro', async () => {
+  const { window, firebase } = loadApp(['tests/helpers/stub-auth.js', 'firebase.js', 'selection.js', 'balance-logic.js', 'compras-import.js', 'stock.js'], '<div id="viewRoot"></div>');
+  const fs = require('fs'), path = require('path'), d = window.document, tick = ms => new Promise(r => setTimeout(r, ms));
+  firebase._store.products = {
+    M1: { name: 'ATEMPO', desc: 'PEDAL DOBLE', stock: 1 }, M2: { name: 'ATEMPO', desc: 'CAMPANA', stock: 1 },            // dan a conocer la marca (se repite)
+    D1: { name: 'DADDARIO', desc: 'EJ27H', stock: 1 }, D2: { name: 'DADDARIO', desc: 'EZ900', stock: 1 },
+    A1: { name: 'CAJON MIXTO ENLADRILLADO ATEMPO', stock: 2 },                                                           // nombre largo con marca, sin descripción → se arregla
+    A2: { name: 'CAJON ENLADRILLADO', desc: 'CAJON ENLADRILLADO ATEMPO', stock: 1 },                                    // patrón de la versión anterior → se arregla
+    A3: { name: 'PANDERETA ATEMPO', desc: 'Una descripción que escribí yo', stock: 1 },                                  // ya tiene otra descripción → a mano
+    G1: { name: 'Guitarra clásica', stock: 3 } };                                                                        // sin marca → no se toca
+  await tick(150);
+  d.getElementById('viewRoot').innerHTML = fs.readFileSync(path.join(__dirname, '..', 'views', 'stock-view.html'), 'utf8');
+  await window.refreshProductsNow(); window.Stock.init(); await tick(150);
+  const prop = JSON.parse(JSON.stringify(window.proponerOrdenNombres(window.eval('productsCache'))));
+  assert.deepEqual(prop.cambios.map(c => [c.code, c.nuevoNombre, c.nuevaDesc]).sort(), [['A1', 'ATEMPO', 'CAJON MIXTO ENLADRILLADO'], ['A2', 'ATEMPO', 'CAJON ENLADRILLADO']]);
+  assert.equal(prop.aRevisar, 1);
+  assert.notEqual(d.getElementById('btnOrdenarNombres').style.display, 'none');          // el administrador ve el botón
+  window.alert = () => {};
+  window.abrirOrdenarNombres(); await tick(20);
+  assert.equal(d.querySelectorAll('#ordenarNombresOv input[type=checkbox]').length, 2);
+  d.querySelector('#ordenarNombresOv input[data-i="1"]').checked = false;                // desmarca uno
+  d.querySelector('#ordenarNombresOv [data-x="aplicar"]').click(); await tick(150);
+  const P = firebase._store.products;
+  const unoCambiado = [P.A1, P.A2].filter(p => p.name === 'ATEMPO');
+  assert.equal(unoCambiado.length, 1);                                                    // solo el marcado
+  assert.ok([P.A1, P.A2].some(p => p.name !== 'ATEMPO'));
+  assert.deepEqual([P.G1.name, P.A3.name, P.A3.desc], ['Guitarra clásica', 'PANDERETA ATEMPO', 'Una descripción que escribí yo']);
 });
