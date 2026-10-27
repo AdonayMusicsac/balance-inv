@@ -249,7 +249,11 @@ body .main .topbar { position: relative; padding-right: max(60px, calc(env(safe-
   position: absolute; top: 50%; right: max(12px, env(safe-area-inset-right, 0px)); transform: translateY(-50%); width: 44px; height: 44px; padding: 0;
   display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-2); cursor: pointer;
 }
-@media (max-width: 640px) { .nm-bell { top: 10px; transform: none; } }
+@media (max-width: 640px) {
+  .nm-bell { top: 10px; transform: none; }
+  body .main .topbar { padding-right: max(14px, env(safe-area-inset-right, 0px)); }          /* la fila de botones usa todo el ancho… */
+  body .main .topbar > :first-child { padding-right: 56px; }                                  /* …y solo el título deja sitio a la campana */
+}
 .nm-bell:hover { background: var(--surface-2); }
 .nm-badge {
   position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center;
@@ -279,4 +283,51 @@ body .main .topbar { position: relative; padding-right: max(60px, calc(env(safe-
 
 @media (prefers-reduced-motion: reduce) {
   .nm-tab, .nm-tab::before, .nm-ico, .nm-fab-btn, .nm-fab-i, .nm-fab-item, .nm-fab-menu, .nm-hoja-caja, .nm-hoja-fondo, .nm-panel { transition: none !important; }
+}
+
+/* =========================================================
+   Stock en teléfono: barra de íconos, un solo botón de filtro y pestañas de almacén que caben
+   ========================================================= */
+/* Filtros: un solo botón (origen + orden + herramientas) en todos los tamaños; el selector de origen y «Ordenar nombres» quedan dentro de su ventana */
+body .topbar-actions.stock-actions .tb-desk { display: none !important; }
+body .topbar-actions.stock-actions .tb-filtro { display: inline-flex; align-items: center; gap: 7px; position: relative; }
+body .topbar-actions.stock-actions .tb-filtro.activo::after { content: ''; position: absolute; top: 5px; right: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--red); border: 2px solid var(--surface); }
+body .topbar-title { flex: 0 0 auto; min-width: 150px; }
+@media (min-width: 641px) and (max-width: 1024px) { body .product-table-wrap { display: none; } }   /* tablet: tarjetas en 2 columnas (la tabla se veía debajo, duplicada) */
+.wh-corto { display: none; }
+.fs-cab { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px 8px; font-size: 16px; }
+.fs-tit { margin: 12px 6px 8px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+.fs-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 4px; }
+.fs-chip { min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 14px; cursor: pointer; }
+.fs-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.fs-ok { width: 100%; margin-top: 16px; min-height: 48px; }
+.fs-hoja .nm-hoja-fondo { opacity: 1; }
+
+/* Barra de Stock solo con íconos en teléfono y tablet */
+@media (max-width: 1024px) {
+  body .topbar-actions.stock-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  body .topbar-actions.stock-actions .search-wrap { flex: 1 1 100%; }
+  body .topbar-actions.stock-actions .import-menu-wrap { flex: 0 0 auto !important; }
+  body .topbar-actions.stock-actions .tb-ico {
+    flex: 0 0 44px !important; width: 44px; min-width: 44px; height: 44px; padding: 0; gap: 0;
+    display: inline-flex; align-items: center; justify-content: center; border-radius: 12px;
+  }
+  body .topbar-actions.stock-actions .tb-txt { display: none !important; }                  /* solo íconos (con título y etiqueta para lectores de pantalla) */
+  body .topbar-actions.stock-actions .tb-ico svg { width: 20px; height: 20px; margin: 0; }
+  body .topbar-actions.stock-actions .tb-add { margin-left: auto; background: var(--accent); border-color: var(--accent); color: #fff; }
+  body .topbar-actions.stock-actions .import-menu { max-width: calc(100vw - 32px); }
+}
+
+@media (max-width: 640px) {
+  /* Almacenes: cuatro pestañas iguales que siempre caben (antes se cortaban y no se llegaba al Almacén 3) */
+  body .warehouse-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 8px 12px 10px; overflow: visible; }
+  body .warehouse-tab { min-width: 0; padding: 8px 2px; text-align: center; font-size: 12.5px; }
+  body .warehouse-tab[data-wh=""] .wh-largo { display: none; }
+  body .warehouse-tab[data-wh=""] .wh-corto { display: inline; }
+  body .stock-stats .stat-value { white-space: nowrap; }                                     /* «S/ 4,487.67» en una sola línea */
+}
+@media (max-width: 380px) {
+  body .warehouse-tab .wh-largo { display: none; }
+  body .warehouse-tab .wh-corto { display: inline; }
+  body .warehouse-tab { font-size: 12px; }
 }

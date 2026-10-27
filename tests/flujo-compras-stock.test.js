@@ -357,3 +357,64 @@ test('Ordenar nombres: deja la marca como nombre y el detalle como descripción 
   assert.ok([P.A1, P.A2].some(p => p.name !== 'ATEMPO'));
   assert.deepEqual([P.G1.name, P.A3.name, P.A3.desc], ['Guitarra clásica', 'PANDERETA ATEMPO', 'Una descripción que escribí yo']);
 });
+
+test('Stock en teléfono: barra de íconos accesibles, un botón de filtro (origen + orden) y cuatro pestañas de almacén', async () => {
+  const { window, firebase } = loadApp(['tests/helpers/stub-auth.js', 'firebase.js', 'selection.js', 'balance-logic.js', 'compras-import.js', 'stock.js'], '<div id="viewRoot"></div>');
+  const fs = require('fs'), path = require('path'), d = window.document, tick = ms => new Promise(r => setTimeout(r, ms));
+  firebase._store.products = {
+    P1: { name: 'ZETA', stock: 5, tipo: 'importado', updatedAt: 100, almacenes: { alm1: 5, alm2: 0, alm3: 0 } }, P2: { name: 'ALFA', stock: 1, tipo: 'nacional', updatedAt: 300, almacenes: { alm1: 1, alm2: 0, alm3: 0 } },
+    P3: { name: 'MIKE', stock: 9, tipo: 'importado', updatedAt: 200, almacenes: { alm1: 9, alm2: 0, alm3: 0 } }, P4: { name: 'BETA', stock: 3, updatedAt: 50, almacenes: { alm1: 3, alm2: 0, alm3: 0 } } };   // con reparto ya correcto (si no, la reparación automática cambia updatedAt)
+  await tick(150);
+  d.getElementById('viewRoot').innerHTML = fs.readFileSync(path.join(__dirname, '..', 'views', 'stock-view.html'), 'utf8');
+  await window.refreshProductsNow(); window.Stock.init(); await tick(150);
+  // --- barra: solo íconos en el teléfono (el texto queda para escritorio), todos con nombre accesible
+  assert.ok(d.querySelector('.topbar-actions.stock-actions'));
+  for (const id of ['btnFiltrosStock', 'btnSelectMode', 'btnImportMenu', 'btnExportStock']) {
+    const b = d.getElementById(id); assert.ok(b.classList.contains('tb-ico') && b.querySelector('svg') && (b.getAttribute('aria-label') || '').length > 3, id + ' lleva ícono y nombre accesible');
+  }
+  assert.ok(d.querySelector('.btn-new-item.tb-add svg') && d.querySelector('.btn-new-item').getAttribute('aria-label') === 'Agregar producto');
+  assert.ok(d.querySelector('#importMenuWrap .tb-txt') && d.querySelector('#exportStockLabel.tb-txt') && d.querySelector('#selectModeLabel.tb-txt') && d.querySelector('#btnFiltrosStock .tb-txt'));
+  assert.ok(d.getElementById('origenFilter').classList.contains('tb-desk') && d.getElementById('btnOrdenarNombres').classList.contains('tb-desk'), 'selector de origen y «Ordenar nombres» solo en escritorio');
+  // --- pestañas de almacén: nombre corto y largo, las cuatro presentes
+  const tabs = [...d.querySelectorAll('#warehouseTabs .warehouse-tab')];
+  assert.deepEqual(tabs.map(t => [t.dataset.wh, t.querySelector('.wh-corto').textContent]), [['', 'Todos'], ['alm1', 'Alm. 1'], ['alm2', 'Alm. 2'], ['alm3', 'Alm. 3']]);
+  // --- filtro: origen + orden
+  const codigos = () => plain(window.getFilteredProducts().map(p => p.code));
+  assert.deepEqual(codigos(), ['P1', 'P2', 'P3', 'P4']);
+  window.abrirFiltrosStock();
+  const ov = () => d.getElementById('filtrosStockOv'), chip = (g, v) => ov().querySelector(`.fs-chip[data-grupo="${g}"][data-v="${v}"]`);
+  assert.ok(ov().querySelector('.fs-chip.on[data-grupo="origen"][data-v=""]') && ov().querySelector('.fs-chip.on[data-grupo="orden"][data-v="codigo"]'));
+  chip('origen', 'importado').click();
+  assert.deepEqual(codigos(), ['P1', 'P3']); assert.equal(d.getElementById('origenFilter').value, 'importado');
+  assert.ok(d.getElementById('btnFiltrosStock').classList.contains('activo'), 'punto rojo: hay un filtro activo');
+  chip('orden', 'nombre').click(); assert.deepEqual(codigos(), ['P3', 'P1']);                       // MIKE, ZETA
+  chip('orden', 'stock-desc').click(); assert.deepEqual(codigos(), ['P3', 'P1']);
+  chip('orden', 'stock-asc').click(); assert.deepEqual(codigos(), ['P1', 'P3']);
+  chip('origen', 'sin').click(); assert.deepEqual(codigos(), ['P4']);
+  assert.match(ov().querySelector('.fs-ok').textContent, /Ver 1 producto/);
+  ov().querySelector('[data-x="limpiar"]').click();
+  assert.deepEqual(codigos(), ['P1', 'P2', 'P3', 'P4']); assert.ok(!d.getElementById('btnFiltrosStock').classList.contains('activo'));
+  chip('orden', 'reciente').click(); assert.deepEqual(codigos(), ['P2', 'P3', 'P1', 'P4']);          // updatedAt 300, 200, 100, 50
+  // «Ordenar nombres» está dentro del filtro (administrador) y abre su ventana
+  window.alert = () => {};
+  ov().querySelector('[data-x="nombres"]').click();
+  assert.equal(ov(), null); assert.ok(d.getElementById('ordenarNombresOv'), 'se abrió «Ordenar nombres»');
+  // cerrar con «Ver…» y con Escape
+  window.abrirFiltrosStock(); ov().querySelector('.fs-ok').click(); assert.equal(ov(), null);
+  window.abrirFiltrosStock(); d.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); assert.equal(ov(), null);
+});
+
+test('Stock en teléfono (CSS): íconos sin texto en una fila (teléfono y tablet), (+) a la derecha, almacenes en 4 columnas y valor en una línea', () => {
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'www', 'responsive.css'), 'utf8').replace(/\r/g, '');
+  const b = css.slice(css.indexOf('Stock en teléfono: barra de íconos'));
+  assert.match(b, /\.stock-actions \.tb-desk \{ display: none !important; \}/);                    // el selector de origen y «Ordenar nombres» van dentro del filtro, en todos los tamaños
+  assert.match(b, /\.stock-actions \.tb-filtro \{ display: inline-flex;/);
+  assert.match(b, /@media \(min-width: 641px\) and \(max-width: 1024px\) \{ body \.product-table-wrap \{ display: none; \} \}/);   // tablet: sin tabla duplicada
+  assert.match(b, /@media \(max-width: 1024px\) \{\s*body \.topbar-actions\.stock-actions \{ display: flex;/);
+  assert.match(b, /\.stock-actions \.tb-ico \{\s*flex: 0 0 44px !important; width: 44px; min-width: 44px; height: 44px;/);   // áreas táctiles de 44 px
+  assert.match(b, /\.stock-actions \.tb-txt \{ display: none !important; \}/);
+  assert.match(b, /\.stock-actions \.tb-add \{ margin-left: auto;/);
+  assert.match(b, /\.warehouse-tabs \{ display: grid; grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);[^}]*overflow: visible;/);
+  assert.match(b, /\.warehouse-tab\[data-wh=""\] \.wh-largo \{ display: none; \}/);
+  assert.match(b, /\.stock-stats \.stat-value \{ white-space: nowrap; \}/);
+});

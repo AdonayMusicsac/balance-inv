@@ -5,20 +5,24 @@
       <h1>Inventario / Stock</h1>
       <p>Control de productos disponibles</p>
     </div>
-    <div class="topbar-actions">
+    <div class="topbar-actions stock-actions">
       <div class="search-wrap">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input type="text" id="searchInput" placeholder="Buscar producto o código…" oninput="filterStock()">
       </div>
-      <select id="origenFilter" class="origen-filter" onchange="filterStock()" title="Filtrar por origen"><option value="">Todos los orígenes</option><option value="nacional">Nacional</option><option value="importado">Importado</option><option value="sin">Sin clasificar</option></select>
-      <button class="btn btn-ghost btn-select" id="btnSelectMode" onclick="toggleSelectionMode()" title="Seleccionar varios">
+      <button class="btn btn-ghost tb-ico tb-filtro" id="btnFiltrosStock" type="button" onclick="abrirFiltrosStock()" title="Filtrar y ordenar" aria-label="Filtrar y ordenar" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24"><path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"/></svg>
+        <span class="tb-txt">Filtros</span>
+      </button>
+      <select id="origenFilter" class="origen-filter tb-desk" onchange="filterStock()" title="Filtrar por origen"><option value="">Todos los orígenes</option><option value="nacional">Nacional</option><option value="importado">Importado</option><option value="sin">Sin clasificar</option></select>
+      <button class="btn btn-ghost btn-select tb-ico" id="btnSelectMode" aria-label="Seleccionar varios" onclick="toggleSelectionMode()" title="Seleccionar varios">
         <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span id="selectModeLabel">Seleccionar</span>
+        <span id="selectModeLabel" class="tb-txt">Seleccionar</span>
       </button>
       <div class="import-menu-wrap" id="importMenuWrap">
-        <button class="btn-import" id="btnImportMenu" onclick="toggleImportMenu(event)">
+        <button class="btn-import tb-ico" id="btnImportMenu" onclick="toggleImportMenu(event)" title="Importar" aria-label="Importar" aria-haspopup="menu">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Importar
+          <span class="tb-txt">Importar</span>
         </button>
         <div class="import-menu" id="importMenuDropdown">
           <button class="import-menu-item" onclick="selectImportMode('full')">
@@ -39,36 +43,36 @@
           </button>
         </div>
       </div>
-      <button class="btn btn-ghost" id="btnExportStock" onclick="exportStock()">
+      <button class="btn btn-ghost tb-ico" id="btnExportStock" onclick="exportStock()" title="Exportar todo" aria-label="Exportar todo">
         <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <span id="exportStockLabel">Exportar todo</span>
+        <span id="exportStockLabel" class="tb-txt">Exportar todo</span>
       </button>
 
       <!-- Import/export de UN almacén — solo visible con un almacén
            seleccionado (ver switchWarehouse en stock.js) -->
-      <button class="btn btn-ghost" id="btnImportWarehouse" style="display:none" onclick="openWarehouseImport()">
+      <button class="btn btn-ghost tb-ico" id="btnImportWarehouse" style="display:none" onclick="openWarehouseImport()" title="Importar cantidad a este almacén" aria-label="Importar cantidad">
         <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Importar cantidad
+        <span class="tb-txt">Importar cantidad</span>
       </button>
-      <button class="btn btn-ghost" id="btnExportWarehouse" style="display:none" onclick="exportWarehouseStock()">
+      <button class="btn btn-ghost tb-ico" id="btnExportWarehouse" style="display:none" onclick="exportWarehouseStock()" title="Exportar este almacén" aria-label="Exportar este almacén">
         <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Exportar
+        <span class="tb-txt">Exportar</span>
       </button>
 
-      <button class="btn btn-ghost" id="btnOrdenarNombres" style="display:none" onclick="abrirOrdenarNombres()" title="Deja el nombre como la marca y el detalle en la descripción">Ordenar nombres</button>
-      <button class="btn btn-primary btn-new-item" onclick="openModal('addModal')">
+      <button class="btn btn-ghost tb-desk" id="btnOrdenarNombres" style="display:none" onclick="abrirOrdenarNombres()" title="Deja el nombre como la marca y el detalle en la descripción">Ordenar nombres</button>
+      <button class="btn btn-primary btn-new-item tb-ico tb-add" onclick="openModal('addModal')" title="Agregar producto" aria-label="Agregar producto">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Agregar producto
+        <span class="tb-txt">Agregar producto</span>
       </button>
     </div>
   </div>
 
   <!-- Pestañas de almacén -->
   <div class="warehouse-tabs" id="warehouseTabs">
-    <button class="warehouse-tab active" data-wh="" onclick="switchWarehouse('')">Todos los almacenes</button>
-    <button class="warehouse-tab" data-wh="alm1" onclick="switchWarehouse('alm1')">Almacén 1</button>
-    <button class="warehouse-tab" data-wh="alm2" onclick="switchWarehouse('alm2')">Almacén 2</button>
-    <button class="warehouse-tab" data-wh="alm3" onclick="switchWarehouse('alm3')">Almacén 3</button>
+    <button class="warehouse-tab active" data-wh="" onclick="switchWarehouse('')"><span class="wh-largo">Todos los almacenes</span><span class="wh-corto">Todos</span></button>
+    <button class="warehouse-tab" data-wh="alm1" onclick="switchWarehouse('alm1')"><span class="wh-largo">Almacén 1</span><span class="wh-corto">Alm. 1</span></button>
+    <button class="warehouse-tab" data-wh="alm2" onclick="switchWarehouse('alm2')"><span class="wh-largo">Almacén 2</span><span class="wh-corto">Alm. 2</span></button>
+    <button class="warehouse-tab" data-wh="alm3" onclick="switchWarehouse('alm3')"><span class="wh-largo">Almacén 3</span><span class="wh-corto">Alm. 3</span></button>
   </div>
 
   <div class="page-content">

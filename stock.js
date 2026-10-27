@@ -150,7 +150,8 @@ let stockScrollObserver = null;
 function normalizarBusqueda(t) {
   return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\/.\-\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
-function getFilteredProducts() {
+function getFilteredProducts() { return ordenarProductos(filtrarProductos()); }
+function filtrarProductos() {
   const q = (document.getElementById('searchInput')?.value || '').trim();
   const origen = document.getElementById('origenFilter')?.value || '';
   const porOrigen = p => !origen || (origen === 'sin' ? !p.tipo : p.tipo === origen);
@@ -167,6 +168,56 @@ function getFilteredProducts() {
   });
 }
 
+
+// ---------------------------------------------------------
+// Filtrar y ordenar (un solo botón en el teléfono): origen + orden de la lista. El selector de origen del escritorio sigue siendo el mismo.
+// ---------------------------------------------------------
+let stockOrden = 'codigo';
+const STOCK_ORDENES = [['codigo', 'Código'], ['nombre', 'Nombre A–Z'], ['stock-asc', 'Stock: menos primero'], ['stock-desc', 'Stock: más primero'], ['reciente', 'Más recientes']];
+const STOCK_ORIGENES = [['', 'Todos'], ['nacional', 'Nacional'], ['importado', 'Importado'], ['sin', 'Sin clasificar']];
+
+function ordenarProductos(lista) {
+  if (stockOrden === 'codigo') return lista;
+  const nom = p => String(p.name || ''), porNombre = (a, b) => nom(a).localeCompare(nom(b), 'es', { sensitivity: 'base' }), c = lista.slice();
+  if (stockOrden === 'nombre') return c.sort(porNombre);
+  if (stockOrden === 'stock-asc') return c.sort((a, b) => getDisplayStock(a) - getDisplayStock(b) || porNombre(a, b));
+  if (stockOrden === 'stock-desc') return c.sort((a, b) => getDisplayStock(b) - getDisplayStock(a) || porNombre(a, b));
+  if (stockOrden === 'reciente') return c.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+  return lista;
+}
+function marcarFiltroStock() {   // punto rojo en el botón cuando hay un filtro u orden distinto del normal
+  const b = document.getElementById('btnFiltrosStock'); if (!b) return;
+  b.classList.toggle('activo', !!(document.getElementById('origenFilter')?.value) || stockOrden !== 'codigo');
+}
+function abrirFiltrosStock() {
+  document.getElementById('filtrosStockOv')?.remove();
+  const ov = document.createElement('div'); ov.id = 'filtrosStockOv'; ov.className = 'nm-hoja fs-hoja';
+  const origenActual = () => document.getElementById('origenFilter')?.value || '';
+  const chips = (grupo, lista, actual) => lista.map(([v, t]) => `<button type="button" class="fs-chip${v === actual ? ' on' : ''}" data-grupo="${grupo}" data-v="${v}" aria-pressed="${v === actual}">${t}</button>`).join('');
+  const pintar = () => {
+    ov.innerHTML = `<div class="nm-hoja-fondo" data-x="listo"></div><div class="nm-hoja-caja" role="dialog" aria-modal="true" aria-label="Filtrar y ordenar">
+      <div class="nm-hoja-asa" aria-hidden="true"></div>
+      <div class="fs-cab"><strong>Filtrar y ordenar</strong><button type="button" class="nm-link" data-x="limpiar">Limpiar</button></div>
+      <p class="fs-tit">Origen</p><div class="fs-chips">${chips('origen', STOCK_ORIGENES, origenActual())}</div>
+      <p class="fs-tit">Ordenar por</p><div class="fs-chips">${chips('orden', STOCK_ORDENES, stockOrden)}</div>
+      ${_verCosto() ? `<p class="fs-tit">Herramientas</p><button type="button" class="nm-hoja-item" data-x="nombres"><span>Ordenar nombres y descripciones</span></button>` : ''}
+      <button type="button" class="btn btn-primary fs-ok" data-x="listo">Ver ${getFilteredProducts().length} producto(s)</button></div>`;
+  };
+  const cerrar = () => { document.removeEventListener('keydown', tecla); ov.remove(); };
+  const tecla = e => { if (e.key === 'Escape') cerrar(); };
+  ov.onclick = e => {
+    const chip = e.target.closest('.fs-chip'), x = e.target.dataset && e.target.dataset.x;
+    if (chip) {
+      if (chip.dataset.grupo === 'origen') { const sel = document.getElementById('origenFilter'); if (sel) sel.value = chip.dataset.v; } else stockOrden = chip.dataset.v;
+      filterStock(); marcarFiltroStock(); pintar();
+    } else if (x === 'limpiar') { const sel = document.getElementById('origenFilter'); if (sel) sel.value = ''; stockOrden = 'codigo'; filterStock(); marcarFiltroStock(); pintar(); }
+    else if (x === 'nombres') { cerrar(); abrirOrdenarNombres(); }
+    else if (x === 'listo') cerrar();
+  };
+  document.addEventListener('keydown', tecla);
+  pintar(); document.body.appendChild(ov); ov.hidden = false;
+  requestAnimationFrame ? requestAnimationFrame(() => ov.classList.add('abierta')) : ov.classList.add('abierta');
+}
 
 // ---------------------------------------------------------
 // Ordenar nombres: deja el NOMBRE como marca (ATEMPO, DADDARIO…) y el detalle en la DESCRIPCIÓN, en los productos que ya estaban guardados.
@@ -714,6 +765,7 @@ function addProduct() {
 function filterStock() {
   stockRenderLimit = STOCK_PAGE_SIZE; // nueva búsqueda: se vuelve a la primera página de resultados
   renderStockPage();
+  marcarFiltroStock();
 }
 
 /* ── Teclado ── */
@@ -946,6 +998,7 @@ window.Stock = {
     switchWarehouse('');
     applyStockRoleRestrictions();
     { const bo = document.getElementById('btnOrdenarNombres'); if (bo) bo.style.display = _verCosto() ? '' : 'none'; }
+    marcarFiltroStock();
     if (!document.getElementById('stockCostStyle')) { const st = document.createElement('style'); st.id = 'stockCostStyle'; document.head.appendChild(st); }
     document.getElementById('stockCostStyle').textContent = '';   // el costo de compra lo ven todos los usuarios
     cargarCostosStock();

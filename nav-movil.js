@@ -52,6 +52,10 @@
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const svg = (n, cls) => `<svg class="nm-ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONOS[n] || ''}</svg>`;
+  // El foco inicial solo se muestra con teclado; con el dedo no aparece un aro sobre el primer ícono.
+  let porTeclado = false;
+  document.addEventListener('keydown', () => { porTeclado = true; }, true);
+  document.addEventListener('pointerdown', () => { porTeclado = false; }, true);
   const esVendedor = () => !!document.querySelector('.role-vendedor');
   const paginaActual = () => (window.Router && window.Router.currentPage) || ($('.nav-item.active[data-page]') || {}).dataset?.page || (location.hash || '').replace('#', '') || 'dashboard';
 
@@ -124,7 +128,7 @@
     const abrir = forzar === undefined ? fab.dataset.abierto !== 'true' : forzar;
     if (abrir) { cerrarHoja(); cerrarPanel(); }
     fab.dataset.abierto = abrir ? 'true' : 'false'; fabBtn.setAttribute('aria-expanded', abrir ? 'true' : 'false'); fondo.hidden = !abrir;
-    if (abrir) { const p = $('.nm-fab-item', fab); if (p) p.focus({ preventScroll: true }); }
+    if (abrir && porTeclado) { const p = $('.nm-fab-item', fab); if (p) p.focus({ preventScroll: true }); }
   }
   const cerrarFab = () => { if (fab && fab.dataset.abierto === 'true') alternarFab(false); };
 
@@ -144,7 +148,7 @@
     const iconoDe = it => { const s = it.page ? $(`.nav-item[data-page="${it.page}"] svg`) : null; return s ? s.outerHTML.replace('<svg', '<svg class="nm-ico"') : svg(it.icono || 'settings'); };
     $('.nm-hoja-lista', hoja).innerHTML = CONFIG.mas.map((it, i) => (it.soloAdmin && esVendedor()) ? '' : `${it.separador ? '<hr class="nm-sep">' : ''}<button type="button" class="nm-hoja-item" data-i="${i}">${iconoDe(it)}<span>${esc(it.label)}</span></button>`).join('');
     hoja.hidden = false; siguienteCuadro(() => hoja.classList.add('abierta'));
-    const p = $('.nm-hoja-item', hoja); if (p) p.focus({ preventScroll: true });
+    if (porTeclado) { const p = $('.nm-hoja-item', hoja); if (p) p.focus({ preventScroll: true }); }
   }
   function cerrarHoja() { if (!hoja || hoja.hidden) return; hoja.classList.remove('abierta'); hoja.hidden = true; }
 
@@ -200,7 +204,7 @@
   function actualizarEstado() {
     const pag = paginaActual();
     $$('.nm-tab').forEach(t => { const on = t.dataset.page === pag; t.classList.toggle('activa', on); if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current'); });
-    const modal = !!document.querySelector('.modal-overlay.open, .foto-ed-ov, #ordenarNombresOv, .ci-modal, #ciModal');
+    const modal = !!document.querySelector('.modal-overlay.open, .foto-ed-ov, #ordenarNombresOv, #filtrosStockOv, .ci-modal, #ciModal');
     document.body.classList.toggle('nm-modal', modal);
     document.body.classList.toggle('nm-sin-fab', pag === 'nueva-nota');       // esa pantalla ya tiene su propia barra de acciones abajo
   }
