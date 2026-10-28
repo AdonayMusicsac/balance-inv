@@ -506,6 +506,14 @@
         <label class="ci-f"><span>Cantidad</span><input class="ci-qty" type="number" min="1" value="${l.qty || 1}"></label>
         <label class="ci-f"><span>Precio c/IGV</span><input class="ci-price" type="number" min="0" step="0.01" value="${l.precio || 0}"><small class="ci-alza" style="display:none;color:#a15c00;font-weight:600"></small></label>
         <div class="ci-f"><span>Importe</span><b class="ci-imp">S/ 0.00</b></div>
+        <label class="ci-f ci-f-alm"><span>Almacén de esta línea</span><select class="ci-alm"><option value="">Predeterminado</option><option value="alm1">Almacén 1</option><option value="alm2">Almacén 2</option><option value="alm3">Almacén 3</option><option value="rep">Repartir entre almacenes…</option></select></label>
+        <div class="ci-rep" style="display:none">
+          <div class="ci-f ci-rc" data-k="1"><span class="ci-rc-h">Almacén 1<button type="button" class="ci-rep-x" title="Quitar este almacén del reparto" aria-label="Quitar Almacén 1 del reparto">×</button></span><input class="ci-r1" type="number" min="0" step="1" value="0" aria-label="Cantidad en Almacén 1"></div>
+          <div class="ci-f ci-rc" data-k="2"><span class="ci-rc-h">Almacén 2<button type="button" class="ci-rep-x" title="Quitar este almacén del reparto" aria-label="Quitar Almacén 2 del reparto">×</button></span><input class="ci-r2" type="number" min="0" step="1" value="0" aria-label="Cantidad en Almacén 2"></div>
+          <div class="ci-f ci-rc" data-k="3"><span class="ci-rc-h">Almacén 3<button type="button" class="ci-rep-x" title="Quitar este almacén del reparto" aria-label="Quitar Almacén 3 del reparto">×</button></span><input class="ci-r3" type="number" min="0" step="1" value="0" aria-label="Cantidad en Almacén 3"></div>
+          <div class="ci-rep-add"><button type="button" class="btn ci-rep-chip" data-k="1">+ Almacén 1</button><button type="button" class="btn ci-rep-chip" data-k="2">+ Almacén 2</button><button type="button" class="btn ci-rep-chip" data-k="3">+ Almacén 3</button></div>
+          <small class="ci-rep-est"></small>
+        </div>
       </div></td></tr>`;
     const filas = (borrador.lineas.length ? borrador.lineas : [{ codigo: '', desc: '', qty: 1, precio: 0 }]).map(fila).join('');
     const crudo = borrador.texto ? `<details class="bal-hint"><summary>Ver el texto que se leyó del archivo</summary><pre style="white-space:pre-wrap;max-height:160px;overflow:auto">${esc(borrador.texto)}</pre></details>` : '';
@@ -521,7 +529,7 @@
           <label class="bal-field"><span>Fecha</span><input id="ciFecha" type="date" value="${esc(borrador.fecha)}"></label>
           <label class="bal-field"><span>Serie</span><input id="ciSerie" value="${esc(borrador.serie)}"></label>
           <label class="bal-field"><span>Número</span><input id="ciNum" value="${esc(borrador.numero)}"></label>
-          <label class="bal-field"><span>Almacén donde se añade</span><select id="ciAlm"><option value="alm1">Almacén 1</option><option value="alm2">Almacén 2</option><option value="alm3">Almacén 3</option></select></label>
+          <label class="bal-field"><span>Almacén predeterminado</span><select id="ciAlm"><option value="alm1">Almacén 1</option><option value="alm2">Almacén 2</option><option value="alm3">Almacén 3</option></select></label>
         </div>
         <h3 style="margin:14px 0 6px">Productos</h3>
         <p class="bal-hint">Elige el producto de cada línea, o deja «Producto nuevo» para crearlo con la descripción y el código que ves. Sin elegir = se descarta.${borrador.lineas.length ? '' : ' No se detectaron líneas: escríbelas aquí.'}</p>
@@ -543,6 +551,18 @@
         const ult = codeSel && codeSel !== '__nuevo__' && prods[codeSel] ? Number(prods[codeSel].costoUltimo) || 0 : 0, nuevo = Number(tr.querySelector('.ci-price').value) || 0;
         const sube = ult > 0 && nuevo > ult * 1.01 ? Math.round((nuevo / ult - 1) * 100) : 0;   // ¿costó más que la última compra de ese producto?
         avis.style.display = sube ? '' : 'none'; avis.textContent = sube ? `▲ +${sube}% frente a la última compra (S/ ${ult.toFixed(2)})` : '';
+        const qtyL = Math.floor(Number(tr.querySelector('.ci-qty').value) || 0), selAlm = tr.querySelector('.ci-alm'), panel = tr.querySelector('.ci-rep');
+        selAlm.options[0].textContent = 'Predeterminado (' + q('ciAlm').options[q('ciAlm').selectedIndex].text + ')';
+        panel.style.display = selAlm.value === 'rep' ? '' : 'none';
+        if (selAlm.value === 'rep') {   // el reparto debe sumar exactamente la cantidad de la línea
+          const vis = [...panel.querySelectorAll('.ci-rc')].filter(c => c.style.display !== 'none').length;   // almacenes que siguen en el reparto
+          panel.querySelectorAll('.ci-rep-x').forEach(b => { b.disabled = vis <= 1; });                           // siempre queda al menos uno
+          panel.querySelectorAll('.ci-rep-chip').forEach(b => { b.style.display = panel.querySelector('.ci-rc[data-k="' + b.dataset.k + '"]').style.display === 'none' ? '' : 'none'; });
+          panel.querySelector('.ci-rep-add').style.display = vis < 3 ? '' : 'none';
+          const suma = ['.ci-r1', '.ci-r2', '.ci-r3'].reduce((a, c) => a + Math.max(0, Math.floor(Number(tr.querySelector(c).value) || 0)), 0), est = tr.querySelector('.ci-rep-est');
+          est.textContent = suma === qtyL ? `✓ Repartido ${suma} de ${qtyL}` : suma < qtyL ? `Faltan ${qtyL - suma} por asignar (${suma} de ${qtyL})` : `Sobran ${suma - qtyL} (${suma} de ${qtyL})`;
+          est.style.color = suma === qtyL ? '#1e8a5f' : '#c3462f';
+        }
         const imp = r2((Number(tr.querySelector('.ci-qty').value) || 0) * (Number(tr.querySelector('.ci-price').value) || 0)); total += imp;
         tr.querySelector('.ci-imp').textContent = 'S/ ' + imp.toFixed(2);
       });
@@ -551,13 +571,40 @@
     ov.onclick = e => { if (e.target === ov) cerrar(); };
     q('ciCancel').onclick = cerrar;
     q('ciProvBuscar').onclick = async e => { e.preventDefault(); if (!buscarPorRuc) return; const nm = await buscarPorRuc(q('ciRuc').value, true); if (nm) q('ciProv').value = nm; };
-    q('ciLineas').oninput = q('ciLineas').onchange = refrescar;
-    q('ciLineas').onclick = e => { if (e.target.classList.contains('ci-del')) { e.target.closest('tr').remove(); refrescar(); } };
+    q('ciLineas').oninput = q('ciLineas').onchange = e => {
+      if (e.type === 'change' && e.target.classList && e.target.classList.contains('ci-alm') && e.target.value === 'rep') {   // al abrir el reparto, toda la cantidad parte en el almacén predeterminado
+        const tr = e.target.closest('tr'), suma = ['.ci-r1', '.ci-r2', '.ci-r3'].reduce((a, c) => a + (Number(tr.querySelector(c).value) || 0), 0);
+        if (!suma) { const k = (q('ciAlm').value || 'alm1').replace('alm', ''); tr.querySelector('.ci-r' + k).value = Math.max(0, Math.floor(Number(tr.querySelector('.ci-qty').value) || 0)); }
+      }
+      refrescar();
+    };
+    q('ciAlm').onchange = refrescar;
+    q('ciLineas').onclick = e => {
+      const t = e.target;
+      if (t.classList.contains('ci-del')) { t.closest('tr').remove(); refrescar(); return; }
+      if (t.classList.contains('ci-rep-x') && !t.disabled) {   // saca ese almacén del reparto (su cantidad vuelve a 0)
+        const c = t.closest('.ci-rc'); c.querySelector('input').value = 0; c.style.display = 'none'; refrescar(); return;
+      }
+      if (t.classList.contains('ci-rep-chip')) {              // vuelve a incluir un almacén
+        const c = t.closest('.ci-rep').querySelector('.ci-rc[data-k="' + t.dataset.k + '"]'); c.style.display = ''; c.querySelector('input').focus(); refrescar();
+      }
+    };
     q('ciAdd').onclick = () => { q('ciLineas').insertAdjacentHTML('beforeend', fila({ qty: 1, precio: 0 })); refrescar(); };
     refrescar();
     const aprobar = guardar => {
-      const lineas = [...q('ciLineas').querySelectorAll('tr')].map(tr => ({ code: tr.querySelector('.ci-prod').value, qty: Number(tr.querySelector('.ci-qty').value), precio: Number(tr.querySelector('.ci-price').value), codigoNuevo: tr.querySelector('.ci-cod').value.trim(), desc: tr.querySelector('.ci-desc').value.trim(), tipoNuevo: tr.querySelector('.ci-tipo').value })).filter(l => l.code);
+      let errReparto = '';
+      const lineas = [...q('ciLineas').querySelectorAll('tr')].map(tr => {
+        const l = { code: tr.querySelector('.ci-prod').value, qty: Number(tr.querySelector('.ci-qty').value), precio: Number(tr.querySelector('.ci-price').value), codigoNuevo: tr.querySelector('.ci-cod').value.trim(), desc: tr.querySelector('.ci-desc').value.trim(), tipoNuevo: tr.querySelector('.ci-tipo').value };
+        const sel = tr.querySelector('.ci-alm').value;
+        if (sel === 'rep') {
+          const g = c => Math.max(0, Math.floor(Number(tr.querySelector(c).value) || 0));
+          l.reparto = { alm1: g('.ci-r1'), alm2: g('.ci-r2'), alm3: g('.ci-r3') };
+          if (l.code && l.reparto.alm1 + l.reparto.alm2 + l.reparto.alm3 !== l.qty) errReparto = errReparto || `El reparto entre almacenes de «${l.desc || l.code}» debe sumar ${l.qty || 0}.`;
+        } else if (sel) l.almacen = sel;
+        return l;
+      }).filter(l => l.code);
       if (guardar && !lineas.length) return alert('Elige al menos un producto antes de registrar la compra.');
+      if (errReparto) return alert(errReparto);
       if (lineas.some(l => l.code === '__nuevo__' && !l.desc)) return alert('Escribe la descripción de los productos nuevos.');
       alAprobar({ proveedor: q('ciProv').value.trim(), ruc: q('ciRuc').value.trim(), tipo: q('ciTipo').value, fecha: q('ciFecha').value, serie: q('ciSerie').value.trim(), numero: q('ciNum').value.trim(), almacen: q('ciAlm').value, lineas }, guardar === true);
       cerrar();

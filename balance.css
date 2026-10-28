@@ -176,3 +176,35 @@
 .fg-acc .btn { min-height: 32px; padding: 4px 10px; }
 .fg-del:hover { color: #c62828; border-color: #c62828; }
 .fg-msg { min-height: 18px; font-size: 12.5px; color: var(--text-3); }
+/* ── Gestor de fotos: origen de la foto (cámara / galería), estado vacío y hoja inferior en teléfono ── */
+.fg-vacio { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 22px 16px; border: 1.5px dashed var(--border-strong); border-radius: 12px; background: var(--surface-2); }
+.fg-vacio strong { font-size: 14px; color: var(--text-1); }
+.fg-vacio > span:last-child { font-size: 12.5px; color: var(--text-3); max-width: 240px; }
+.fg-vacio-ic { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); margin-bottom: 6px; }
+.fg-foot { position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 10px; background: var(--surface, #fff); padding-top: 10px; border-top: 1px solid var(--border); }
+.fg-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fg-src { justify-content: center; gap: 8px; min-height: 46px; font-weight: 600; background: var(--surface, #fff); color: var(--text-1); border-color: var(--border-strong); }
+.fg-src svg { width: 20px; height: 20px; color: var(--accent); }
+.fg-cam { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+.fg-src:disabled { opacity: .45; cursor: not-allowed; }
+.fg-cuenta { grid-column: 1 / -1; text-align: center; font-size: 12px; color: var(--text-3); }
+.fg-foot .fg-ok { width: 100%; justify-content: center; min-height: 46px; }
+@media (max-width: 640px) {
+  .foto-ed-ov-sheet { align-items: flex-end; padding: 0; }
+  .foto-ed-ov-sheet .foto-gest { width: 100%; max-height: 88vh; border-radius: 20px 20px 0 0; padding: 18px 16px calc(14px + env(safe-area-inset-bottom, 0px)); animation: fg-sube .22s ease-out; position: relative; }
+  .foto-ed-ov-sheet .foto-gest::before { content: ''; position: absolute; top: 7px; left: 50%; width: 38px; height: 4px; margin-left: -19px; border-radius: 4px; background: var(--border-strong); }
+}
+@keyframes fg-sube { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .foto-ed-ov-sheet .foto-gest { animation: none; } }
+/* ── Modal del comprobante: almacén por línea y reparto entre almacenes ── */
+.ci-f-alm { grid-column: span 3; }
+.ci-rep { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 10px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--surface-2); }
+.ci-rep-est { grid-column: 1 / -1; font-size: 12.5px; font-weight: 600; }
+@media (max-width: 719px) { .ci-f-alm { grid-column: span 2; } }
+.ci-rep { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.ci-rc-h { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
+.ci-rep-x { border: 0; background: transparent; color: var(--text-3, #777); font-size: 18px; line-height: 1; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; padding: 0; }
+.ci-rep-x:hover:not(:disabled) { background: #fbe9e6; color: #c3462f; }
+.ci-rep-x:disabled { opacity: .3; cursor: not-allowed; }
+.ci-rep-add { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.ci-rep-chip { min-height: 32px; padding: 4px 12px; font-size: 12.5px; border-radius: 999px; border-style: dashed; }

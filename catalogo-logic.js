@@ -302,25 +302,32 @@ async function subirFotoEditada(code, file) {
 // Ventana con todas las fotos del producto: agregar (con editor), elegir la principal, ordenar y eliminar.
 function gestionarFotos(code, producto, alCambiar) {
   let lista = fotosDe(producto);
-  const ov = document.createElement('div'); ov.className = 'foto-ed-ov';
+  const ov = document.createElement('div'); ov.className = 'foto-ed-ov foto-ed-ov-sheet';
   ov.innerHTML = `<div class="foto-ed foto-gest" role="dialog" aria-modal="true"><div class="foto-ed-top"><strong>Fotos de ${_esc(producto.name || code)}</strong><span>La primera es la principal. Máximo ${MAX_FOTOS}.</span></div>
     <div class="fg-grid"></div><div class="fg-msg"></div>
     <input type="file" class="fg-file" accept="image/*" style="display:none">
-    <div class="foto-ed-acc"><button type="button" class="btn fg-add">＋ Agregar foto</button><button type="button" class="btn btn-primary fg-ok">Listo</button></div></div>`;
+    <input type="file" class="fg-file-cam" accept="image/*" capture="environment" style="display:none">
+    <div class="fg-foot"><div class="fg-add"><button type="button" class="btn fg-src fg-cam"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.1-1.6A1.5 1.5 0 0 1 10.05 4.7h3.9a1.5 1.5 0 0 1 1.25.7L16.3 7h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.8" r="3.3"/></svg><span>Tomar foto</span></button><button type="button" class="btn fg-src fg-gal"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l4.6-4.4a1.5 1.5 0 0 1 2.1 0L15 16.8l1.6-1.5a1.5 1.5 0 0 1 2 0L20.5 17"/></svg><span>Galería</span></button><span class="fg-cuenta"></span></div>
+    <button type="button" class="btn btn-primary fg-ok">Listo</button></div></div>`;
   document.body.appendChild(ov);
   const q = s2 => ov.querySelector(s2), msg = t => { q('.fg-msg').textContent = t || ''; };
   const pintar = () => {
     q('.fg-grid').innerHTML = lista.map((u, i) => `<div class="fg-item"><img src="${_esc(u)}" alt="" loading="lazy">${i === 0 ? '<span class="fg-badge">Principal</span>' : ''}
-      <div class="fg-acc">${i > 0 ? `<button type="button" class="btn" data-a="principal" data-i="${i}" title="Poner como principal">★</button>` : ''}${i > 0 ? `<button type="button" class="btn" data-a="izq" data-i="${i}" title="Mover antes">‹</button>` : ''}${i < lista.length - 1 ? `<button type="button" class="btn" data-a="der" data-i="${i}" title="Mover después">›</button>` : ''}<button type="button" class="btn fg-del" data-a="borrar" data-i="${i}" title="Eliminar">🗑</button></div></div>`).join('') || '<p class="bal-note">Aún no hay fotos.</p>';
-    q('.fg-add').disabled = lista.length >= MAX_FOTOS; q('.fg-add').textContent = `＋ Agregar foto (${lista.length}/${MAX_FOTOS})`;
+      <div class="fg-acc">${i > 0 ? `<button type="button" class="btn" data-a="principal" data-i="${i}" title="Poner como principal">★</button>` : ''}${i > 0 ? `<button type="button" class="btn" data-a="izq" data-i="${i}" title="Mover antes">‹</button>` : ''}${i < lista.length - 1 ? `<button type="button" class="btn" data-a="der" data-i="${i}" title="Mover después">›</button>` : ''}<button type="button" class="btn fg-del" data-a="borrar" data-i="${i}" title="Eliminar">🗑</button></div></div>`).join('') || '<div class="fg-vacio"><span class="fg-vacio-ic"><svg viewBox=\"0 0 24 24\" width=\"26\" height=\"26\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.1-1.6A1.5 1.5 0 0 1 10.05 4.7h3.9a1.5 1.5 0 0 1 1.25.7L16.3 7h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z\"/><circle cx=\"12\" cy=\"12.8\" r=\"3.3\"/></svg></span><strong>Aún no hay fotos</strong><span>Toma una foto con la cámara o elige una de tu galería.</span></div>';
+    const lleno = lista.length >= MAX_FOTOS;
+    q('.fg-cam').disabled = q('.fg-gal').disabled = lleno;
+    q('.fg-cuenta').textContent = `${lista.length}/${MAX_FOTOS} fotos`;
   };
   const aplicar = async nueva => { try { msg('Guardando…'); lista = await guardarFotos(code, nueva); Object.assign(producto, { images: lista.length ? lista : undefined, image: lista[0] || undefined }); msg(''); if (alCambiar) alCambiar(lista); } catch (e) { msg(''); alert('No se pudo guardar: ' + e.message); } pintar(); };
-  q('.fg-add').onclick = () => { q('.fg-file').value = ''; q('.fg-file').click(); };
-  q('.fg-file').onchange = async () => {
-    const f = q('.fg-file').files[0]; if (!f) return;
+  const alElegir = async inp => {
+    const f = inp.files[0]; if (!f) return;
     try { const url = await subirFotoEditada(code, f); if (url) { msg('Subiendo…'); await aplicar([...lista, url]); } }
     catch (e) { msg(''); alert(e.message); }
   };
+  q('.fg-gal').onclick = () => { q('.fg-file').value = ''; q('.fg-file').click(); };
+  q('.fg-cam').onclick = () => { q('.fg-file-cam').value = ''; q('.fg-file-cam').click(); };   // en el teléfono abre la cámara trasera; en PC abre el selector de archivos
+  q('.fg-file').onchange = () => alElegir(q('.fg-file'));
+  q('.fg-file-cam').onchange = () => alElegir(q('.fg-file-cam'));
   q('.fg-grid').onclick = e => {
     const a = e.target.dataset && e.target.dataset.a, i = Number(e.target.dataset && e.target.dataset.i);
     if (!a) return;

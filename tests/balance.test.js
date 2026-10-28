@@ -473,3 +473,71 @@ test('Compras: el modal del comprobante deja elegir el almacén y «Aprobar y re
   const p = firebase._store.products.G1;
   assert.equal(p.stock, 5); assert.deepEqual({ ...p.almacenes }, { alm1: 1, alm2: 0, alm3: 4 });
 });
+
+test('Compras: una línea se reparte entre los 3 almacenes desde el modal y el stock queda por almacén', async () => {
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'compras-view.html'), 'utf8');
+  const { window, firebase } = loadApp(['firebase.js', 'balance-logic.js', 'compras-import.js'], html);
+  firebase._store.products = { G1: { name: 'Guitarra Clevan', stock: 1, tipo: 'importado', price: 0, almacenes: { alm1: 1, alm2: 0, alm3: 0 } } };
+  const d = window.document, $ = id => d.getElementById(id), tick = ms => new Promise(r => setTimeout(r, ms));
+  await window.Compras.init();
+  Object.defineProperty($('cpArchivo'), 'files', { value: [{ name: 'F001-123.xml', type: 'text/xml', text: async () => XML }], configurable: true });
+  $('cpArchivo').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(100);
+  const sel = d.querySelector('.ci-alm'); sel.value = 'rep'; sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.equal(d.querySelector('.ci-rep').style.display, '');
+  assert.equal(d.querySelector('.ci-r1').value, '4');                       // al abrir el reparto, todo parte en el almacén predeterminado
+  const poner = (c, v) => { const i = d.querySelector(c); i.value = v; i.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  let aviso = ''; window.alert = m => { aviso = m; };
+  poner('.ci-r1', 1); poner('.ci-r2', 1); poner('.ci-r3', 1);               // suma 3 de 4: no cuadra
+  assert.match(d.querySelector('.ci-rep-est').textContent, /Falta/);
+  d.getElementById('ciGuardar').click(); await tick(50);
+  assert.match(aviso, /debe sumar 4/); assert.equal(firebase._store.products.G1.stock, 1);   // no registra nada
+  poner('.ci-r1', 1); poner('.ci-r2', 2); poner('.ci-r3', 1);               // 1 + 2 + 1 = 4
+  d.getElementById('ciGuardar').click(); await tick(200);
+  const p = firebase._store.products.G1;
+  assert.equal(p.stock, 5); assert.deepEqual({ ...p.almacenes }, { alm1: 2, alm2: 2, alm3: 1 });
+  const cs = Object.values(firebase._store.compras);
+  assert.equal(cs.length, 3); assert.equal(cs.reduce((a, c) => a + c.cantidad, 0), 4);
+  assert.deepEqual(cs.map(c => c.almacen).sort(), ['alm1', 'alm2', 'alm3']);
+});
+
+test('registrarFactura: producto nuevo repartido entre almacenes se crea una sola vez y exige que el reparto sume', async () => {
+  const { window, firebase } = loadApp(['firebase.js', 'balance-logic.js']);
+  firebase._store.products = {};
+  const h = { proveedor: 'CLEVAN SAC', ruc: '20123456789', fecha: '2026-10-02', compTipo: 'Factura', compSerie: 'F001', compNum: '9', almacen: 'alm1' };
+  const nuevo = { code: 'ZZ1', nombre: 'ZETA', desc: 'x', tipo: 'importado' };
+  await assert.rejects(window.registrarFactura(h, [{ nuevo, tipo: 'importado', qty: 5, precio: 10, reparto: { alm1: 1, alm2: 1, alm3: 1 } }]), /debe sumar 5/);
+  assert.equal(Object.keys(firebase._store.products).length, 0);            // la validación falla antes de crear nada
+  const r = await window.registrarFactura(h, [{ nuevo, tipo: 'importado', qty: 5, precio: 10, reparto: { alm1: 0, alm2: 3, alm3: 2 } }]);
+  assert.equal(r.creados.length, 1);
+  const p = firebase._store.products.ZZ1;
+  assert.equal(p.stock, 5); assert.deepEqual({ alm1: p.almacenes.alm1, alm2: p.almacenes.alm2, alm3: p.almacenes.alm3 }, { alm1: 0, alm2: 3, alm3: 2 });
+  assert.equal(r.total, 50);                                                // el importe total no cambia por repartir
+});
+
+test('Compras: en el reparto se puede quitar un almacén (×) y volver a agregarlo; solo se registran los elegidos', async () => {
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'compras-view.html'), 'utf8');
+  const { window, firebase } = loadApp(['firebase.js', 'balance-logic.js', 'compras-import.js'], html);
+  firebase._store.products = { G1: { name: 'Guitarra Clevan', stock: 1, tipo: 'importado', price: 0, almacenes: { alm1: 1, alm2: 0, alm3: 0 } } };
+  const d = window.document, $ = id => d.getElementById(id), tick = ms => new Promise(r => setTimeout(r, ms));
+  await window.Compras.init();
+  Object.defineProperty($('cpArchivo'), 'files', { value: [{ name: 'F001-123.xml', type: 'text/xml', text: async () => XML }], configurable: true });
+  $('cpArchivo').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(100);
+  const sel = d.querySelector('.ci-alm'); sel.value = 'rep'; sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  const celda = k => d.querySelector(`.ci-rc[data-k="${k}"]`), chip = k => d.querySelector(`.ci-rep-chip[data-k="${k}"]`);
+  assert.equal(celda(2).style.display, '');                                  // al abrir, los 3 almacenes se ven
+  celda(2).querySelector('.ci-rep-x').click();                               // quita el Almacén 2
+  assert.equal(celda(2).style.display, 'none'); assert.equal(chip(2).style.display, ''); assert.equal(chip(1).style.display, 'none');
+  celda(3).querySelector('.ci-rep-x').click();                               // quita el 3: solo queda el 1 y su × se bloquea
+  assert.equal(celda(1).querySelector('.ci-rep-x').disabled, true);
+  chip(3).click(); assert.equal(celda(3).style.display, '');                 // lo vuelve a agregar
+  const poner = (c, v) => { const i = d.querySelector(c); i.value = v; i.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  poner('.ci-r1', 3); poner('.ci-r3', 1);                                    // 3 + 1 = 4, sin Almacén 2
+  d.getElementById('ciGuardar').click(); await tick(200);
+  const p = firebase._store.products.G1;
+  assert.equal(p.stock, 5); assert.deepEqual({ ...p.almacenes }, { alm1: 4, alm2: 0, alm3: 1 });
+  assert.deepEqual(Object.values(firebase._store.compras).map(c => c.almacen).sort(), ['alm1', 'alm3']);
+});

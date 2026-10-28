@@ -153,6 +153,10 @@ async function registrarFactura(h, lineas) {
     } else if (!l.code) throw new Error(`Línea ${i + 1}: elige un producto.`);
     else if (!_CODE_OK.test(String(l.code))) throw new Error(`Línea ${i + 1}: código de producto inválido.`);
     if (!Number.isInteger(l.qty) || l.qty < 1) throw new Error(`Línea ${i + 1}: la cantidad debe ser un entero mayor a 0.`);
+    if (l.reparto) {   // la cantidad se reparte entre los almacenes: debe sumar exactamente la cantidad de la línea
+      const v = _ALMS.map(a => Number(l.reparto[a]) || 0);
+      if (v.some(n => !Number.isInteger(n) || n < 0) || v.reduce((a, b) => a + b, 0) !== l.qty) throw new Error(`Línea ${i + 1}: el reparto entre almacenes debe sumar ${l.qty}.`);
+    }
     if (!(_precioNum(l.precio) >= 0) || !Number.isFinite(_precioNum(l.precio))) throw new Error(`Línea ${i + 1}: precio inválido.`);
   });
   const conComp = !!h.compTipo;
@@ -196,9 +200,13 @@ async function registrarFactura(h, lineas) {
     }
     for (const l of lineas) {
       const c0 = l.nuevo ? { code: _claveCodigo(l.nuevo.code), nombre: l.nuevo.nombre.trim(), tipo: l.nuevo.tipo } : {};
-      const id = await registrarCompra({ proveedor: h.proveedor, ruc: h.ruc, fecha: h.fecha, pago: h.pago, nOperacion: h.nOperacion, estadoPago: h.estadoPago, observ: h.observ, almacen: l.almacen || h.almacen, moneda: h.moneda === 'USD' ? 'USD' : 'PEN', tc: h.tc, ...l, ...c0,
-        docTipo: conComp ? h.compTipo : '', docNum: num, docQty: conComp ? l.qty : 0, igvIncluido: true, facturaId, sinConfirmar: true, alzas });
-      hechas.push(id);
+      // Sin reparto: todo va a un almacén (el de la línea o el de la factura). Con reparto: una entrada por cada almacén con su cantidad.
+      const partes = l.reparto ? _ALMS.map(a => [a, Number(l.reparto[a]) || 0]).filter(x => x[1] > 0) : [[l.almacen || h.almacen, l.qty]];
+      for (const [alm, cant] of partes) {
+        const id = await registrarCompra({ proveedor: h.proveedor, ruc: h.ruc, fecha: h.fecha, pago: h.pago, nOperacion: h.nOperacion, estadoPago: h.estadoPago, observ: h.observ, almacen: l.almacen || h.almacen, moneda: h.moneda === 'USD' ? 'USD' : 'PEN', tc: h.tc, ...l, ...c0,
+          qty: cant, almacen: alm, docTipo: conComp ? h.compTipo : '', docNum: num, docQty: conComp ? cant : 0, igvIncluido: true, facturaId, sinConfirmar: true, alzas });
+        hechas.push(id);
+      }
     }
   } catch (e) {
     for (const id of hechas.reverse()) await _revertirCompra(id).catch(x => { fallos.push(`compra ${id}: ${x.message}`); });
@@ -557,7 +565,7 @@ window.Compras = {
             <select class="nv-tipo"><option value="importado">Importado</option><option value="nacional">Nacional</option></select>
             <small class="bal-hint">Se crea con este código y descripción. Precios en Stock.</small>
           </div></td>
-        <td data-label="Cantidad"><input class="ln-qty" type="number" min="1" inputmode="numeric" placeholder="Cant."></td>
+        <td data-label="Cantidad"><input class="ln-qty" type="number" min="1" inputmode="numeric" placeholder="Cant."><small class="ln-alm bal-hint" style="display:none"></small></td>
         <td data-label="Costo c/IGV"><input class="ln-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Costo unit. con IGV"><small class="ln-alza" style="display:none;color:#a15c00;font-weight:600"></small></td>
         <td data-label="Total" class="ln-total">S/ 0.00</td>
         <td data-label=""><button type="button" class="btn ln-del">Quitar</button></td>`;
@@ -565,7 +573,8 @@ window.Compras = {
     };
     const lineas = () => [...$('cpLineas').querySelectorAll('tr')].map(tr => {
       const code = tr.querySelector('.ln-prod').value, esNuevo = code === NUEVO;
-      return { code, esNuevo, tr, qty: Number(tr.querySelector('.ln-qty').value), precio: Number(tr.querySelector('.ln-price').value),
+      let reparto = null; try { reparto = tr.dataset.rep ? JSON.parse(tr.dataset.rep) : null; } catch (e) { /* reparto ilegible: se ignora */ }
+      return { code, esNuevo, tr, almacen: tr.dataset.alm || '', reparto, qty: Number(tr.querySelector('.ln-qty').value), precio: Number(tr.querySelector('.ln-price').value),
         nuevo: esNuevo ? { code: tr.querySelector('.nv-code').value.trim(), nombre: tr.querySelector('.nv-name').value.trim(), desc: tr.querySelector('.nv-desc').value.trim(), tipo: tr.querySelector('.nv-tipo').value } : null };
     });
     const tipoDe = l => l.esNuevo ? l.nuevo.tipo : (prods[l.code] || {}).tipo;
@@ -581,7 +590,13 @@ window.Compras = {
       $('cpAviso').textContent = sinTipo ? 'Sin clasificar: se tomarán como Nacional.' : imp && !$('cpCompTipo').value ? 'Importados: registra su factura o boleta.' : '';
     };
     const tipoComp = () => { const c = $('cpCompTipo').value; document.querySelectorAll('.cp-comp').forEach(e => e.style.display = c ? '' : 'none'); recalcular(); };
-    $('cpLineas').oninput = $('cpLineas').onchange = recalcular;
+    $('cpLineas').oninput = $('cpLineas').onchange = e => {
+      if (e.target.classList && e.target.classList.contains('ln-qty')) {
+        const tr = e.target.closest('tr');
+        if (tr && tr.dataset.rep) { delete tr.dataset.rep; const et = tr.querySelector('.ln-alm'); et.textContent = 'Cambiaste la cantidad: el reparto se quitó y irá al almacén de arriba.'; et.style.display = ''; }
+      }
+      recalcular();
+    };
     $('cpLineas').onclick = e => { if (e.target.classList.contains('ln-del')) { if ($('cpLineas').children.length > 1) e.target.closest('tr').remove(); recalcular(); } };
     $('cpAddLinea').onclick = nuevaLinea;
     $('cpCompTipo').onchange = tipoComp;
@@ -601,6 +616,9 @@ window.Compras = {
       (b.lineas.length ? b.lineas : [{}]).forEach(l => {
         const tr = nuevaLinea(); if (!l.code) return;
         tr.querySelector('.ln-prod').value = l.code; tr.querySelector('.ln-qty').value = l.qty; tr.querySelector('.ln-price').value = l.precio;
+        const NOM_ALM = { alm1: 'Almacén 1', alm2: 'Almacén 2', alm3: 'Almacén 3' }, et = tr.querySelector('.ln-alm');
+        if (l.reparto) { tr.dataset.rep = JSON.stringify(l.reparto); et.textContent = 'Reparto: ' + Object.keys(NOM_ALM).filter(a => l.reparto[a] > 0).map(a => `${NOM_ALM[a]} ${l.reparto[a]}`).join(' · '); et.style.display = ''; }
+        else if (NOM_ALM[l.almacen]) { tr.dataset.alm = l.almacen; et.textContent = 'Va a ' + NOM_ALM[l.almacen]; et.style.display = ''; }
         if (l.code === NUEVO) { tr.querySelector('.nv-code').value = l.codigoNuevo || ''; {
           const sep = CI && CI.separarMarca ? CI.separarMarca(l.desc, marcas) : null;
           if (sep) { tr.querySelector('.nv-name').value = sep.nombre; tr.querySelector('.nv-desc').value = sep.desc; }
@@ -702,8 +720,9 @@ window.Compras = {
       try {
         const r = await registrarFactura({ proveedor: $('cpProv').value.trim(), ruc: $('cpRuc').value.trim(), fecha: $('cpDate').value, compTipo: $('cpCompTipo').value,
           compSerie: $('cpSerie').value.trim().toUpperCase(), compNum: $('cpNumero').value.trim(), pago: $('cpPago').value, nOperacion: $('cpOp') ? $('cpOp').value.trim() : '', estadoPago: $('cpEstado').value, almacen: $('cpAlm') ? $('cpAlm').value : 'alm1', observ: $('cpObs').value.trim() },
-          lineas().map(l => l.esNuevo ? { nuevo: l.nuevo, tipo: l.nuevo.tipo, nombre: l.nuevo.nombre, qty: l.qty, precio: l.precio }
-            : { code: l.code, nombre: (prods[l.code] || {}).name, tipo: (prods[l.code] || {}).tipo || 'nacional', qty: l.qty, precio: l.precio }));
+          lineas().map(l => ({ ...(l.esNuevo ? { nuevo: l.nuevo, tipo: l.nuevo.tipo, nombre: l.nuevo.nombre, qty: l.qty, precio: l.precio }
+            : { code: l.code, nombre: (prods[l.code] || {}).name, tipo: (prods[l.code] || {}).tipo || 'nacional', qty: l.qty, precio: l.precio }),
+            ...(l.reparto ? { reparto: l.reparto } : l.almacen ? { almacen: l.almacen } : {}) })));
         // Se comprueba en Firebase que lo guardado de verdad exista y se muestra el stock resultante.
         const hechas = await Promise.all(r.ids.map(id => refCompras.child(id).get().then(sn => sn.val())));
         if (hechas.some(x => !x)) throw new Error('La compra no quedó guardada en el servidor. Revisa tu conexión e inténtalo de nuevo.');
