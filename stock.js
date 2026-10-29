@@ -541,6 +541,13 @@ function openEditStock(code, name, stock, price, cat, desc) {
   const prod = productsCache.find(p => p.code === code) || {};
   const tipoEl = document.getElementById('editTipo');
   if (tipoEl) tipoEl.value = prod.tipo || '';
+  // Almacén donde está el producto (el que tenga más cantidad)
+  const almEl = document.getElementById('editAlm');
+  if (almEl) {
+    const n = normalizarAlmacenes(prod);
+    almEl.value = ['alm1', 'alm2', 'alm3'].reduce((a, b) => n[b] > n[a] ? b : a, 'alm1');
+    almEl.dataset.orig = almEl.value;
+  }
   editingCostoOriginal = Math.round((costoDe(prod) || 0) * 100) / 100;
   const costEl = document.getElementById('editCost');
   if (costEl) costEl.value = editingCostoOriginal || '';
@@ -585,9 +592,21 @@ function saveStock() {
     ...(costoCambio ? { costoCompra: Math.round(costo * 10000) / 10000 } : {})
   }, existing.stock);
 
-  const chain = codeChanged
+  const almEl = document.getElementById('editAlm');
+  const almNuevo = almEl ? almEl.value : '';
+  const almCambio = !!almEl && almNuevo !== almEl.dataset.orig;
+
+  let chain = codeChanged
     ? renameProductCode(editingCode, newCode).then(doSave)
     : doSave();
+
+  // Si cambió el almacén, todo el stock del producto pasa al almacén elegido
+  if (almCambio) {
+    chain = chain.then(() => refProducts.child(finalCode).update({
+      almacenes: repartoInicial(stock, almNuevo),
+      updatedAt: firebase.database.ServerValue.TIMESTAMP
+    }));
+  }
 
   chain
     .then(() => {
