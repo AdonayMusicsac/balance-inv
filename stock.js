@@ -299,9 +299,10 @@ function productCardHtml(p) {
   const escapedCode = escapeJsAttr(code);
   const escapedCat  = escapeJsAttr(category);
   const isChecked = (typeof selectedStockCodes !== 'undefined' && selectedStockCodes.has(code)) ? 'checked' : '';
-  // Siempre abre el formulario completo (en cualquier almacén). La cantidad que se edita es el TOTAL del producto.
-  const stockTotal = p.stock !== undefined ? p.stock : 0;
-  const editOnclick = `openEditStock('${escapedCode}','${escapedName}','${stockTotal}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
+  const editOnclick = currentWarehouse
+    ? `openEditWarehouseQty('${escapedCode}','${escapedName}',${stock})`
+    : `openEditStock('${escapedCode}','${escapedName}','${stock}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
+  const estado = stock <= 0 ? ['out', 'Sin stock'] : stock <= 6 ? ['low', 'Stock bajo'] : ['ok', 'Disponible'];
   return `
     <div class="product-card${isChecked ? ' selected' : ''}" data-code="${escapeHtml(code)}">
       <div class="pc-top">
@@ -310,41 +311,51 @@ function productCardHtml(p) {
             onchange="onStockCheckToggle(this)" onclick="event.stopPropagation()">
         </div>
         <div class="pc-code-wrap">
-          <span class="pc-lbl">Código:</span>
           <span class="pc-code">${escapeHtml(displayProductCode(code))}</span>
+          ${origenTagHtml(p)}
         </div>
-        <button class="btn-icon-edit" title="Editar"
-          onclick="${editOnclick}">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-        </button>
-        ${_verCosto() ? `<button class="btn-icon-edit" title="Eliminar" onclick="deleteProductRow('${escapedCode}')">${ICON_DEL}</button>` : ''}
+        <span class="pc-estado ${estado[0]}"><i></i>${estado[1]}</span>
+        <div class="pc-mas-wrap">
+          <button class="btn-icon-edit pc-mas" type="button" title="Más acciones" aria-label="Más acciones" aria-haspopup="menu" aria-expanded="false" onclick="togglePcMenu(event, this)">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          </button>
+          <div class="pc-menu" role="menu" hidden>
+            <button type="button" role="menuitem" onclick="closePcMenus(); ${editOnclick}">Editar</button>
+            ${_verCosto() ? `<button type="button" role="menuitem" class="pc-menu-del" onclick="closePcMenus(); deleteProductRow('${escapedCode}')">Eliminar</button>` : ''}
+          </div>
+        </div>
       </div>
       <div class="pc-mid">
         <div class="pc-name-wrap">
-          <span class="pc-lbl">Prdto:</span>
-          <span class="pc-name">${escapeHtml(name)}</span>
+          <span class="pc-name">${escapeHtml(name)}</span>${desc ? `<span class="pc-desc">${escapeHtml(desc)}</span>` : ''}
         </div>
-        ${desc ? `<div class="pc-desc">${escapeHtml(desc)}</div>` : ''}
-        <div>${origenTagHtml(p)}</div>
       </div>
       <div class="pc-bot">
         <div class="pc-bot-item">
-          <span class="pc-lbl">Cantidad:</span>
-          <span class="pc-qty ${stockClass}">${stock}</span>
+          <span class="pc-lbl">Stock</span>
+          <span class="pc-qty ${stockClass}${stock <= 0 ? ' stock-out' : ''}">${stock}</span>
         </div>
         <div class="pc-bot-item">
-          <span class="pc-lbl">Precio:</span>
+          <span class="pc-lbl">Venta</span>
           <span class="pc-price">${precioHtml(price)}</span>
         </div>
-        ${costoDe(p) ? `<div class="pc-bot-item"><span class="pc-lbl">Costo:</span><span class="pc-price">S/ ${costoDe(p).toFixed(2)}</span></div>` : ''}
+        ${costoDe(p) ? `<div class="pc-bot-item"><span class="pc-lbl">Costo</span><span class="pc-price">S/ ${costoDe(p).toFixed(2)}</span></div>` : ''}
       </div>
     </div>
   `;
 }
+
+// Menú «⋯» de la tarjeta (Editar / Eliminar): se cierra al tocar fuera o al elegir una opción.
+function closePcMenus() {
+  document.querySelectorAll('.pc-menu:not([hidden])').forEach(m => { m.hidden = true; const b = m.previousElementSibling; if (b) b.setAttribute('aria-expanded', 'false'); });
+}
+function togglePcMenu(e, btn) {
+  e.stopPropagation();
+  const menu = btn.nextElementSibling, abrir = menu.hidden;
+  closePcMenus();
+  if (abrir) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); }
+}
+if (!window._pcMenuListo) { window._pcMenuListo = true; document.addEventListener('click', e => { if (!e.target.closest('.pc-mas-wrap')) closePcMenus(); }); }
 
 function productRowHtml(p) {
   const code = p.code || '';
@@ -359,9 +370,9 @@ function productRowHtml(p) {
   const escapedCat  = escapeJsAttr(category);
   const isChecked = (typeof selectedStockCodes !== 'undefined' && selectedStockCodes.has(code)) ? 'checked' : '';
   const showCheckbox = typeof currentUserRole !== 'undefined' && currentUserRole !== 'vendedor';
-  // Siempre abre el formulario completo (en cualquier almacén). La cantidad que se edita es el TOTAL del producto.
-  const stockTotal = p.stock !== undefined ? p.stock : 0;
-  const editOnclick = `openEditStock('${escapedCode}','${escapedName}','${stockTotal}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
+  const editOnclick = currentWarehouse
+    ? `openEditWarehouseQty('${escapedCode}','${escapedName}',${stock})`
+    : `openEditStock('${escapedCode}','${escapedName}','${stock}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
   return `
     <tr data-code="${escapeHtml(code)}" class="${isChecked ? 'row-selected' : ''}">
       ${showCheckbox ? `<td class="col-check"><input type="checkbox" class="row-checkbox stock-check" data-code="${escapeHtml(code)}" ${isChecked} onchange="onStockCheckToggle(this)"></td>` : ''}
@@ -482,7 +493,7 @@ function updateStats() {
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statLow').textContent   = low;
   const sv = document.getElementById('statValue');
-  sv.textContent = `S/ ${value.toLocaleString('es-PE', { maximumFractionDigits: 2 })}`;
+  sv.textContent = `S/ ${value.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   sv.title = sinCosto ? `${sinCosto} producto(s) con stock no tienen costo de compra registrado y no suman.` : '';
 }
 
@@ -545,9 +556,7 @@ function openEditStock(code, name, stock, price, cat, desc) {
   const almEl = document.getElementById('editAlm');
   if (almEl) {
     const n = normalizarAlmacenes(prod);
-    almEl.value = (currentWarehouse && n[currentWarehouse] > 0)
-      ? currentWarehouse
-      : ['alm1', 'alm2', 'alm3'].reduce((a, b) => n[b] > n[a] ? b : a, 'alm1');
+    almEl.value = ['alm1', 'alm2', 'alm3'].reduce((a, b) => n[b] > n[a] ? b : a, 'alm1');
     almEl.dataset.orig = almEl.value;
   }
   editingCostoOriginal = Math.round((costoDe(prod) || 0) * 100) / 100;

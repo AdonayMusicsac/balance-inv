@@ -154,112 +154,69 @@
 }
 
 
-/* ── Product card ───────────────────── */
+/* ── Product card (modelo C): etiqueta de código, estado, nombre y fila de datos Stock · Venta · Costo ── */
 .product-card {
   display: block;               /* nunca flex/table en mobile */
   width: 100%;
   box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
+  border-radius: 14px;
+  padding: 16px;
 }
-
-/* Fila superior: Código + botón editar */
-.pc-top {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 11px 13px;
-  gap: 8px;
-}
-.pc-code-wrap {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 5px;
-  flex: 1;
-  min-width: 0;
-}
-
-/* Fila media: Artículo + descripción */
-.pc-mid {
-  padding: 0 13px 10px;
-}
-.pc-name-wrap {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 5px;
-  flex-wrap: nowrap;
-}
-
-/* Fila inferior: Cantidad + Precio */
-.pc-bot {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: wrap;            /* en pantallas angostas el costo pasa a otra línea en vez de partir «S/ 400» */
-  gap: 6px 18px;
-  padding: 8px 13px;
-  border-top: 1px solid var(--border);
-}
-.pc-bot-item {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 5px;
-}
-
-
-/* ── Tipografía del card ─────────────── */
-.pc-lbl {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-3);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
+.pc-top { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.pc-code-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; flex: 1; min-width: 0; }
+.pc-code-wrap .origen-mini { margin-top: 0; }
 .pc-code {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-1);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  /* Mismo motivo que .pt-code en la tabla: con nowrap, un código
-     largo quedaba recortado en silencio por el overflow:hidden de
-     .product-card (sin ni siquiera un "…" que avisara). Se deja
-     hacer salto de línea para que siempre se vea completo. */
-  overflow-wrap: break-word;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.03em;
+  text-transform: uppercase; color: #fff; background: var(--text-1);
+  padding: 4px 8px; border-radius: 6px;
+  overflow-wrap: anywhere;      /* un código largo se parte en vez de recortarse */
 }
-.pc-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-1);
-  line-height: 1.3;
+.pc-estado { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
+.pc-estado i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pc-estado.ok  { color: #1E6F4D; background: #E9F6EE; }
+.pc-estado.low { color: #8A5B00; background: #FBF0D8; }
+.pc-estado.out { color: #8F2F1A; background: #FBE9E6; }
+
+/* Menú ⋯ (Editar / Eliminar) */
+.pc-mas-wrap { position: relative; flex: none; margin: -8px -12px -8px 0; }
+.pc-mas { width: 44px; height: 44px; border-color: transparent; border-radius: 12px; background: transparent; color: var(--text-3); }
+.pc-mas:hover { background: var(--surface-2); color: var(--text-1); border-color: transparent; }
+.pc-menu {
+  position: absolute; right: 12px; top: calc(100% - 6px); z-index: 30; min-width: 156px;
+  display: flex; flex-direction: column; padding: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(28, 26, 23, 0.18);
 }
-.pc-desc {
-  font-size: 11px;
-  color: var(--text-3);
-  margin-top: 3px;
-  line-height: 1.3;
-  padding-left: 42px; /* alinea bajo el nombre */
+.pc-menu[hidden] { display: none; }
+.pc-menu button {
+  min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: none; text-align: left;
+  font: 600 14px var(--font-ui); color: var(--text-1); cursor: pointer;
 }
-.pc-qty {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
+.pc-menu button:hover { background: var(--surface-2); }
+.pc-menu .pc-menu-del { color: var(--red); }
+
+/* Nombre y descripción */
+.pc-mid { padding: 12px 0 0; }
+.pc-name-wrap { display: block; }
+.pc-name { font-size: 16px; font-weight: 600; line-height: 1.25; color: var(--text-1); }
+.pc-desc { display: inline; margin: 0; padding: 0; font-size: 14px; line-height: 1.3; color: var(--text-2); }
+.pc-desc::before { content: ' · '; }
+
+/* Fila de datos: Stock · Venta · Costo (el costo pasa a otra línea si la pantalla es muy angosta) */
+.pc-bot {
+  display: grid; grid-auto-flow: column; grid-template-columns: auto 1fr 1fr; gap: 0 14px;
+  margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--border);
 }
-.pc-price {
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-1);
-}
+.pc-bot-item { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.pc-lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.pc-qty, .pc-price { font-family: var(--font-mono); font-size: 16px; font-weight: 600; line-height: 1.1; white-space: nowrap; }
+.pc-price { color: var(--text-1); }
+.pc-qty.stock-low { color: #8A5B00; }
+.pc-qty.stock-out { color: var(--red); }
+
+
 .stock-low { color: var(--red); }
 .stock-ok  { color: var(--green); }
 
@@ -338,4 +295,42 @@
   color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+
+/* ══════════════════════════════════════
+   Stock en teléfono y tablet (modelo C)
+   Las reglas llevan «body .main» delante para ganarle a responsive.css sin tocarlo.
+   ══════════════════════════════════════ */
+body .product-card .pc-code { font-size: 12px; }
+body .product-card .pc-name { font-size: 16px; }
+body .product-card .pc-qty, body .product-card .pc-price { font-size: 16px; }
+body .product-card .pc-lbl { font-size: 11px; }
+
+@media (max-width: 1024px) {
+  /* Resumen: tarjeta oscura con el valor del inventario + dos cuadros chicos (Productos, Stock bajo) */
+  body .main .stock-stats { display: grid; grid-template-columns: 1.35fr 1fr !important; gap: 8px; margin-bottom: 16px; }
+  body .main .stock-stats .stat-card {
+    grid-column: auto; flex-direction: row; align-items: center; justify-content: space-between;
+    min-height: 52px; padding: 0 14px; border-radius: 14px; box-shadow: none;
+  }
+  body .main .stock-stats .stat-card:nth-child(3) {
+    order: -1; grid-column: 1; grid-row: span 2; flex-direction: column; align-items: flex-start; justify-content: space-between;
+    padding: 16px; background: #12201C; border-color: #12201C;
+  }
+  body .main .stock-stats .stat-card:nth-child(3) .stat-label { color: #9DB8AB; }
+  body .main .stock-stats .stat-card:nth-child(3) .stat-value { color: #fff; font-size: 24px; letter-spacing: -0.02em; }
+  body .main .stock-stats .stat-card:nth-child(2) { background: #FBF1EE; border-color: #F0D3CB; }
+  body .main .stock-stats .stat-card:nth-child(2) .stat-label { color: #8F2F1A; }
+
+  /* Almacenes: control segmentado en una sola pieza */
+  body .main .warehouse-tabs { gap: 2px; margin: 12px 16px 0; padding: 4px; background: #E7E2D3; border: 0; border-radius: 12px; }
+  body .main .warehouse-tab { border: 0; border-radius: 9px; color: #52584F; }
+  body .main .warehouse-tab.active { background: #fff; color: var(--accent); box-shadow: 0 1px 2px rgba(28, 26, 23, 0.12); }
+
+  /* Buscador y filtro en la misma fila */
+  body .main .topbar-actions.stock-actions .search-wrap { flex: 1 1 calc(100% - 60px); width: auto; min-width: 0; height: 48px; padding: 0 14px; border-radius: 12px; background: var(--surface); }
+  body .main .topbar-actions.stock-actions .search-wrap svg { width: 17px; height: 17px; }
+  body .main .topbar-actions.stock-actions .search-wrap input { font-size: 14px; }
+  body .main .topbar-actions.stock-actions .tb-filtro { flex: 0 0 48px !important; width: 48px; height: 48px; border-radius: 12px; }
 }

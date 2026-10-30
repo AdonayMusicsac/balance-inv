@@ -213,15 +213,15 @@ function abrirEditorFoto(file) {
       let rot = 0, zoom = 1, ox = 0, oy = 0, aspKey = '1:1', brillo = 100, vw = 300, vh = 300;
       const dims = () => (rot % 2 ? { w: img.naturalHeight, h: img.naturalWidth } : { w: img.naturalWidth, h: img.naturalHeight });
       const aspecto = () => { const a = ASPECTOS_FOTO.find(x => x[0] === aspKey)[2]; const d = dims(); return a || Math.min(3, Math.max(0.4, d.w / d.h)); };
-      const ov = document.createElement('div'); ov.className = 'foto-ed-ov';
-      ov.innerHTML = `<div class="foto-ed" role="dialog" aria-modal="true" aria-label="Ajustar foto">
-        <div class="foto-ed-top"><strong>Ajustar foto</strong><span>Arrastra para mover · pellizca o usa el zoom</span></div>
-        <div class="foto-ed-stage"><canvas class="foto-ed-canvas"></canvas></div>
-        <div class="foto-ed-asp">${ASPECTOS_FOTO.map(x => `<button type="button" class="btn foto-ed-a${x[0] === aspKey ? ' on' : ''}" data-asp="${x[0]}">${x[1]}</button>`).join('')}</div>
-        <div class="foto-ed-row"><button type="button" class="btn" data-z="-">−</button><input type="range" class="foto-ed-zoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom"><button type="button" class="btn" data-z="+">+</button>
-          <button type="button" class="btn" data-rot="-1" title="Girar a la izquierda">⟲</button><button type="button" class="btn" data-rot="1" title="Girar a la derecha">⟳</button></div>
-        <div class="foto-ed-row foto-ed-br"><label>Brillo <input type="range" class="foto-ed-brillo" min="70" max="130" step="1" value="100"></label></div>
-        <div class="foto-ed-acc"><button type="button" class="btn" data-x="cancel">Cancelar</button><button type="button" class="btn btn-primary" data-x="ok">✓ Aceptar y guardar</button></div></div>`;
+      const ov = document.createElement('div'); ov.className = 'foto-ed-ov foto-ed-ov-ed';
+      ov.innerHTML = `<div class="foto-ed foto-ed-v2" role="dialog" aria-modal="true" aria-label="Ajustar foto">
+        <div class="foto-ed-top"><strong>Ajustar foto</strong><span>Arrastra · pellizca para el zoom</span></div>
+        <div class="foto-ed-stage"><div class="foto-ed-frame"><canvas class="foto-ed-canvas"></canvas><i class="fe-grid"></i><i class="fe-c fe-c1"></i><i class="fe-c fe-c2"></i><i class="fe-c fe-c3"></i><i class="fe-c fe-c4"></i></div>
+          <div class="foto-ed-rot"><button type="button" data-rot="-1" title="Girar a la izquierda" aria-label="Girar a la izquierda"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5A7.5 7.5 0 1 1 4.6 14"/><path d="M5.5 4v4.5H10"/></svg></button><button type="button" data-rot="1" title="Girar a la derecha" aria-label="Girar a la derecha"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.5 8.5A7.5 7.5 0 1 0 19.4 14"/><path d="M18.5 4v4.5H14"/></svg></button></div></div>
+        <div class="foto-ed-asp">${ASPECTOS_FOTO.map(x => `<button type="button" class="foto-ed-a${x[0] === aspKey ? ' on' : ''}" data-asp="${x[0]}">${x[1]}</button>`).join('')}</div>
+        <div class="foto-ed-row foto-ed-zr"><span class="fe-cap">Zoom</span><button type="button" data-z="-" title="Alejar" aria-label="Alejar"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><div class="fe-rg"><input type="range" class="foto-ed-zoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom"></div><button type="button" data-z="+" title="Acercar" aria-label="Acercar"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/><path d="M12 6v12"/></svg></button></div>
+        <div class="foto-ed-row foto-ed-br"><span class="fe-cap">Brillo</span><div class="fe-rg"><input type="range" class="foto-ed-brillo" min="70" max="130" step="1" value="100" aria-label="Brillo"></div></div>
+        <div class="foto-ed-acc"><button type="button" class="btn" data-x="cancel">Cancelar</button><button type="button" class="btn btn-primary" data-x="ok"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Aceptar y guardar</button></div></div>`;
       document.body.appendChild(ov);
       const q = s2 => ov.querySelector(s2), canvas = q('.foto-ed-canvas'), zoomEl = q('.foto-ed-zoom'), brEl = q('.foto-ed-brillo');
       const ctx0 = canvas.getContext && canvas.getContext('2d');
@@ -229,7 +229,7 @@ function abrirEditorFoto(file) {
       if (!filtroOk) q('.foto-ed-br').style.display = 'none';
 
       function marco() {
-        const f = marcoFoto(aspecto(), Math.min(520, window.innerWidth - 40), Math.min(window.innerHeight * 0.5, 520));
+        const f = marcoFoto(aspecto(), Math.min(520, window.innerWidth - 32), Math.min(window.innerHeight * 0.5, 520));
         vw = f.vw; vh = f.vh;
         const dpr = window.devicePixelRatio || 1;
         canvas.style.width = vw + 'px'; canvas.style.height = vh + 'px'; canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
@@ -245,11 +245,12 @@ function abrirEditorFoto(file) {
         if (filtroOk) ctx.filter = 'none';
       }
       const pintar = () => { if (ctx0) dibujar(ctx0, canvas.width / vw); };
-      const poner = z => { zoom = Math.min(4, Math.max(1, z)); zoomEl.value = zoom; pintar(); };
+      const relleno = el => el.style.setProperty('--v', ((el.value - el.min) / (el.max - el.min) * 100) + '%');   // parte verde de la escala hasta el selector
+      const poner = z => { zoom = Math.min(4, Math.max(1, z)); zoomEl.value = zoom; relleno(zoomEl); pintar(); };
       const cerrar = r => { document.removeEventListener('keydown', tecla); ov.remove(); URL.revokeObjectURL(url); resolve(r); };
       const tecla = e => { if (e.key === 'Escape') cerrar(null); };
       document.addEventListener('keydown', tecla);
-      marco(); pintar();
+      marco(); pintar(); relleno(zoomEl); relleno(brEl);
 
       // arrastrar (un dedo) y pellizcar (dos dedos)
       const dedos = new Map(); let dist0 = 0, zoom0 = 1;
@@ -276,7 +277,7 @@ function abrirEditorFoto(file) {
         }
       };
       zoomEl.oninput = () => poner(Number(zoomEl.value));
-      brEl.oninput = () => { brillo = Number(brEl.value); pintar(); };
+      brEl.oninput = () => { brillo = Number(brEl.value); relleno(brEl); pintar(); };
     }
   });
 }
