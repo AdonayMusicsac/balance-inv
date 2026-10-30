@@ -299,9 +299,9 @@ function productCardHtml(p) {
   const escapedCode = escapeJsAttr(code);
   const escapedCat  = escapeJsAttr(category);
   const isChecked = (typeof selectedStockCodes !== 'undefined' && selectedStockCodes.has(code)) ? 'checked' : '';
-  const editOnclick = currentWarehouse
-    ? `openEditWarehouseQty('${escapedCode}','${escapedName}',${stock})`
-    : `openEditStock('${escapedCode}','${escapedName}','${stock}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
+  // Siempre abre el formulario completo (en cualquier almacén). La cantidad que se edita es el TOTAL del producto.
+  const stockTotal = p.stock !== undefined ? p.stock : 0;
+  const editOnclick = `openEditStock('${escapedCode}','${escapedName}','${stockTotal}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
   return `
     <div class="product-card${isChecked ? ' selected' : ''}" data-code="${escapeHtml(code)}">
       <div class="pc-top">
@@ -359,9 +359,9 @@ function productRowHtml(p) {
   const escapedCat  = escapeJsAttr(category);
   const isChecked = (typeof selectedStockCodes !== 'undefined' && selectedStockCodes.has(code)) ? 'checked' : '';
   const showCheckbox = typeof currentUserRole !== 'undefined' && currentUserRole !== 'vendedor';
-  const editOnclick = currentWarehouse
-    ? `openEditWarehouseQty('${escapedCode}','${escapedName}',${stock})`
-    : `openEditStock('${escapedCode}','${escapedName}','${stock}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
+  // Siempre abre el formulario completo (en cualquier almacén). La cantidad que se edita es el TOTAL del producto.
+  const stockTotal = p.stock !== undefined ? p.stock : 0;
+  const editOnclick = `openEditStock('${escapedCode}','${escapedName}','${stockTotal}','${price}','${escapedCat}','${escapeJsAttr(desc)}')`;
   return `
     <tr data-code="${escapeHtml(code)}" class="${isChecked ? 'row-selected' : ''}">
       ${showCheckbox ? `<td class="col-check"><input type="checkbox" class="row-checkbox stock-check" data-code="${escapeHtml(code)}" ${isChecked} onchange="onStockCheckToggle(this)"></td>` : ''}
@@ -545,7 +545,9 @@ function openEditStock(code, name, stock, price, cat, desc) {
   const almEl = document.getElementById('editAlm');
   if (almEl) {
     const n = normalizarAlmacenes(prod);
-    almEl.value = ['alm1', 'alm2', 'alm3'].reduce((a, b) => n[b] > n[a] ? b : a, 'alm1');
+    almEl.value = (currentWarehouse && n[currentWarehouse] > 0)
+      ? currentWarehouse
+      : ['alm1', 'alm2', 'alm3'].reduce((a, b) => n[b] > n[a] ? b : a, 'alm1');
     almEl.dataset.orig = almEl.value;
   }
   editingCostoOriginal = Math.round((costoDe(prod) || 0) * 100) / 100;
